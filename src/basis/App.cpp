@@ -1,20 +1,29 @@
 #include "App.hpp"
 #include "base/Main.hpp"
+#include "Renderer.h"
+#include "AssetManager.h"
 
 using namespace FW;
 
 App::App( void ) : 
 	m_commonCtrl( CommonControls::Feature_Default & ~CommonControls::Feature_RepaintOnF5 ),
+	m_cameraCtrl(&m_commonCtrl, CameraControls::Feature_All),
 	m_action( Action_None )
 {
 	m_commonCtrl.showFPS(true);
-	m_commonCtrl.addButton((S32*)&m_action, Action_Temp, FW_KEY_NONE, "Temp action");
+	m_commonCtrl.addButton((S32*)&m_action, Action_StartPM, FW_KEY_1, "Start photon maping...");
 
 	m_window.setTitle("Application");
     m_window.addListener(this);
     m_window.addListener(&m_commonCtrl);
-
+	m_window.addListener(&m_cameraCtrl);
 	m_window.getGL()->swapBuffers();
+
+	m_assetManager = new AssetManager();
+	m_assetManager->LoadAssets();
+
+	m_renderer = &Renderer::get();
+	m_renderer->startUp(m_window.getGL(), &m_cameraCtrl, m_assetManager);
 }
 
 bool App::handleEvent( const Window::Event& event )
@@ -22,6 +31,12 @@ bool App::handleEvent( const Window::Event& event )
 	if (event.type == Window::EventType_Close)
 	{
 		m_window.showModalMessage("Exiting...");
+		
+		m_assetManager->ReleaseAssets();
+		delete m_assetManager;
+		
+		m_renderer->shutDown();
+
 		delete this;
 		return true;
 	}
@@ -34,8 +49,8 @@ bool App::handleEvent( const Window::Event& event )
 	case Action_None:
 		break;
 
-	case Action_Temp:
-		m_commonCtrl.message("Temp action");
+	case Action_StartPM:
+		Renderer::get().initPhotonMaping(100u);
 		break;
 
 	default:
@@ -46,7 +61,7 @@ bool App::handleEvent( const Window::Event& event )
 	m_window.setVisible(true);
 	if (event.type == Window::EventType_Paint)
 	{
-		// Draw something
+		m_renderer->drawFrame();
 	}
 	m_window.repaint();
 

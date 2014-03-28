@@ -2,6 +2,10 @@
 
 #include "gui/Window.hpp"
 #include "gui/CommonControls.hpp"
+#include "3d/CameraControls.hpp"
+
+class Renderer;
+class AssetManager;
 
 namespace FW
 {
@@ -13,7 +17,7 @@ private:
     enum Action
     {
         Action_None,
-		Action_Temp
+		Action_StartPM
     };
 
 public:
@@ -28,7 +32,11 @@ private:
 private:
 	Window m_window;
 	CommonControls m_commonCtrl;
+	CameraControls	m_cameraCtrl;
 	Action m_action;
+
+	Renderer* m_renderer;
+	AssetManager* m_assetManager;
 
 };
 

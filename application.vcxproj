@@ -337,9 +337,21 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\basis\App.hpp" />
+    <ClInclude Include="src\basis\AssetManager.h" />
+    <ClInclude Include="src\basis\HelpFunctions.h" />
+    <ClInclude Include="src\basis\Memory.h" />
+    <ClInclude Include="src\basis\RayTracer.h" />
+    <ClInclude Include="src\basis\Renderer.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\basis\App.cpp" />
+    <ClCompile Include="src\basis\AssetManager.cpp" />
+    <ClCompile Include="src\basis\Memory.cpp" />
+    <ClCompile Include="src\basis\RayTracer.cpp" />
+    <ClCompile Include="src\basis\Renderer.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="src\basis\rtIntersect.inl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
