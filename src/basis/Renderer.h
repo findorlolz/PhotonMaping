@@ -38,6 +38,7 @@ private:
 		std::vector<TriangleToMeshData> m_triangleToMeshData;
 		std::vector<size_t> m_indexListFromScene;
 		std::vector<Photon> m_photons;
+		std::vector<size_t> m_photonIndexList;
 
 		FW::Mat4f m_projection;
 		FW::Mat4f m_worldToCamera;
@@ -53,6 +54,7 @@ private:
         FW::GLContext::Program* m_shader;
 		
 		Node* m_sceneTree;
+		Node* m_photonTree;
 		bool m_renderWithPhotonMaping;
 		bool m_photonCasted;
 
@@ -67,4 +69,7 @@ private:
 
 		void drawTriangleToCamera(const FW::Vec3f& pos, const FW::Vec4f& color);
 		void drawPhotonMap();
+
+		FW::Vec4f interpolateAttribute(const Triangle& tri, const FW::Vec3f&, const FW::MeshBase* mesh, int attribidx);
+		FW::Vec3f getDiversion(const FW::Vec3f&, const Triangle&);
 };

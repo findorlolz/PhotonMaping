@@ -25,12 +25,16 @@ public:
 	void		shutDown() { delete &get(); }
 
 	Node*		constructHierarchy		(const std::vector<Triangle>&, std::vector<size_t>&);
+	Node*		constructHierarchy		(const std::vector<Photon>&, std::vector<size_t>&);
 	void		demolishTree			(Node*);	
 	bool		rayCast					(const FW::Vec3f&, const FW::Vec3f&, Hit&, const std::vector<Triangle>&, const std::vector<size_t>&, Node*);
+	bool		rayCast					(const FW::Vec3f&, const FW::Vec3f&, Hit&, const std::vector<Photon>&, const std::vector<size_t>&, Node*);
 
 private:
 	void		constructTree(size_t, size_t, Node*, Node*, std::vector<size_t>&);
+	void		constructTree(size_t, size_t, Node*, Node*, std::vector<size_t>&, const std::vector<Photon>&);	
 	void		quickSort(int, int, Axis, std::vector<size_t>&);
+	void		quickSort(int, int, Axis, std::vector<size_t>&, const std::vector<Photon>&);
 	bool		isLeaf(Node*);
 	void		createIndexList(std::vector<size_t>&, size_t);
 	void		createBBForTriangles(const std::vector<Triangle>&, const std::vector<size_t>&);

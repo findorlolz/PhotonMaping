@@ -7,6 +7,7 @@ void AssetManager::LoadAssets()
 		m_meshes[MeshType_Sphere] = importMesh("sphere.obj"); 
 		m_meshes[MeshType_Cube] = importMesh("cube.obj");
 		m_meshes[MeshType_TestScene] = importMesh("testscene.obj");
+		m_meshes[MeshType_Cornell] = importMesh("cornell.obj");
 }
 
 void AssetManager::ReleaseAssets()

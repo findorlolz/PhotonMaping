@@ -13,6 +13,7 @@ enum MeshType
 		MeshType_Sphere,
 		MeshType_Cube,
 		MeshType_TestScene,
+		MeshType_Cornell,
 
         MeshType_Count
 };

@@ -23,6 +23,19 @@ Node* RayTracer::constructHierarchy(const std::vector<Triangle>& triangles, std:
 	return root;
 }
 
+Node* RayTracer::constructHierarchy(const std::vector<Photon>& photons, std::vector<size_t>& indexList)
+{
+	std::cout << "Creating RayTracer Hieracrhy for photons... ";
+	size_t size = photons.size();
+	Node* root = new Node();	
+	
+	createIndexList(indexList, size);
+	constructTree(0, size-1 , root, root, indexList, photons);
+
+	std::cout << "done!" << std::endl;
+	return root;
+}
+
 void RayTracer::constructTree(size_t startPrim, size_t endPrim, Node* node, Node* root,std::vector<size_t>& indexList)
 {
 	node->startPrim = startPrim;
@@ -37,7 +50,7 @@ void RayTracer::constructTree(size_t startPrim, size_t endPrim, Node* node, Node
 		node->BBMin = FW::Vec3f(FLT_MAX, FLT_MAX, FLT_MAX);
 		node->BBMax = FW::Vec3f(-FLT_MAX, -FLT_MAX, -FLT_MAX);
 		
-		for (int prim = startPrim; prim <= endPrim; prim++)
+		for (size_t prim = startPrim; prim <= endPrim; prim++)
 		{
 			node->BBMin = min(node->BBMin, RayTracer::getTriangleBBMinPoint(indexList[prim]));
 			node->BBMax = max(node->BBMax, RayTracer::getTriangleBBMaxPoint(indexList[prim]));
@@ -93,7 +106,7 @@ void RayTracer::constructTree(size_t startPrim, size_t endPrim, Node* node, Node
 			}
 		}
 
-		std::cout << "SAH: " << tmpSAH << " index " << tmpSAHindex << " Axis: " << tmpSAHAxis << std::endl;
+		//std::cout << "SAH: " << tmpSAH << " index " << tmpSAHindex << " Axis: " << tmpSAHAxis << std::endl;
 		node->axis = (Axis)tmpSAHAxis;
 		node->leftChild = leftNode;
 		node->rightChild = rightNode;
@@ -110,6 +123,123 @@ void RayTracer::constructTree(size_t startPrim, size_t endPrim, Node* node, Node
 		constructTree(startPrim, split, leftNode, root, indexList);
 		constructTree(split + 1, endPrim, rightNode, root, indexList);
 	}
+}
+
+void RayTracer::constructTree(size_t startPrim, size_t endPrim, Node* node, Node* root, std::vector<size_t>& indexList, const std::vector<Photon>& photons)
+{
+	node->startPrim = startPrim;
+	node->endPrim = endPrim;
+	
+	node->leftChild = NULL;
+	node->rightChild = NULL;
+	Axis axis;
+
+	if (node == root)
+	{
+		node->BBMin = FW::Vec3f(FLT_MAX, FLT_MAX, FLT_MAX);
+		node->BBMax = FW::Vec3f(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+		
+		for (size_t prim = startPrim; prim <= endPrim; prim++)
+		{
+			node->BBMin = min(node->BBMin, photons[indexList[prim]].pos);
+			node->BBMax = max(node->BBMax, photons[indexList[prim]].pos);
+		}
+	}
+
+	if ((endPrim - startPrim) + 1 > 8)
+	{
+		const size_t bbSize = (endPrim - startPrim + 1);
+		const size_t index = bbSize - 1;
+		float tmpSAH = FLT_MAX;
+		size_t tmpSAHAxis = 0;
+		size_t tmpSAHindex = 0;
+
+		Node* leftNode = new Node();
+		Node* rightNode = new Node();
+
+		std::vector<FW::Vec3i> sortedIndices = std::vector<FW::Vec3i>(bbSize);
+		std::vector<BB> boundingBoxesR = std::vector<BB>(index);
+		std::vector<BB> boundingBoxesL =  std::vector<BB>(index);
+
+		for(auto i = 0u; i < 3; ++i)
+		{
+			quickSort((int)startPrim, (int)endPrim, (Axis) i, indexList, photons);
+			FW::Vec3f maxPointRight = FW::Vec3f(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+			FW::Vec3f maxPointLeft = FW::Vec3f(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+			FW::Vec3f minPointRight = FW::Vec3f(FLT_MAX, FLT_MAX, FLT_MAX);
+			FW::Vec3f minPointLeft = FW::Vec3f(FLT_MAX, FLT_MAX, FLT_MAX);
+			for(auto j = 0u; j < index; ++j)
+			{
+				sortedIndices[j][i] = indexList[startPrim+j];
+				minPointLeft = min(minPointLeft, photons[indexList[startPrim +j]].pos);
+				maxPointLeft = max(maxPointLeft, photons[indexList[startPrim +j]].pos);
+				boundingBoxesL[j].set(minPointLeft, maxPointLeft);
+				minPointRight = min(minPointRight, photons[indexList[endPrim - j]].pos);
+				maxPointRight = max(maxPointRight, photons[indexList[endPrim - j]].pos);
+				boundingBoxesR[index-(j+1)].set(minPointRight, maxPointRight);
+			}
+			sortedIndices[index][i] = indexList[startPrim+index];
+			for(auto j = 0u; j < index; ++j)
+			{
+				float SAH = boundingBoxesL[j].area * (float)(j+1)  + boundingBoxesR[j].area * (float)(index - j);
+				if(SAH < tmpSAH)
+				{
+					leftNode->BBMin = boundingBoxesL[j].min;
+					leftNode->BBMax = boundingBoxesL[j].max;
+					rightNode->BBMin = boundingBoxesR[j].min;
+					rightNode->BBMax = boundingBoxesR[j].max;
+					tmpSAH = SAH;
+					tmpSAHAxis = i;
+					tmpSAHindex = j;
+				}
+			}
+		}
+
+		//std::cout << "SAH: " << tmpSAH << " index " << tmpSAHindex << " Axis: " << tmpSAHAxis << std::endl;
+		node->axis = (Axis)tmpSAHAxis;
+		node->leftChild = leftNode;
+		node->rightChild = rightNode;
+
+		size_t t = 0;
+		for (auto i = startPrim; i <= endPrim; i++)
+		{
+			indexList[i] = sortedIndices[t][tmpSAHAxis]; 
+			t++;
+		}
+
+		size_t split = startPrim + tmpSAHindex;
+			
+		constructTree(startPrim, split, leftNode, root, indexList, photons);
+		constructTree(split + 1, endPrim, rightNode, root, indexList, photons);
+	}
+}
+
+void RayTracer::quickSort(int start, int end, Axis axis, std::vector<size_t>& indexList, const std::vector<Photon>& photons)
+{
+    if (start > end)
+            return;
+
+    // Randomize partition
+    int rndm = m_random.getU32(start, end);
+	std::swap(indexList[rndm], indexList[end]);
+
+    // Partition
+	float pivot = (photons[indexList[end]].pos)[axis];
+    int i = start - 1;
+    for (int j = start; j < end; j++)
+    {
+            if ((photons[indexList[end]].pos)[axis] < pivot)
+            {
+                    i++;
+                    std::swap(indexList[i], indexList[j]);
+            }
+    }
+    std::swap(indexList[i+1], indexList[end]);
+    int middle = i+1;
+
+    // Recursively sort partitions
+	quickSort(start, middle-1, axis, indexList, photons);
+    quickSort(middle+1, end, axis, indexList, photons);
 }
 
 void RayTracer::quickSort(int start, int end, Axis axis, std::vector<size_t>& indexList)

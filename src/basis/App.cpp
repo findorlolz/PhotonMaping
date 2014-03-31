@@ -50,7 +50,7 @@ bool App::handleEvent( const Window::Event& event )
 		break;
 
 	case Action_StartPM:
-		Renderer::get().initPhotonMaping(100u);
+		Renderer::get().initPhotonMaping(1000u);
 		break;
 
 	default:

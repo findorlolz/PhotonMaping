@@ -76,13 +76,12 @@ void Renderer::updateTriangleToMeshDataPointers()
 	{
 		FW::Vec3f p = m_mesh->getVertexAttrib(i, FW::MeshBase::AttribType_Position).getXYZ();
 		m_vertices.push_back(p);
-		p.print();
 	}
 	
 	for (size_t i = 0u; i < m_mesh->numSubmeshes(); ++i )
 	{
 		const FW::Array<FW::Vec3i>& idx = m_mesh->indices(i);
-		for ( int j = 0; j < idx.getSize(); ++j )
+		for (size_t j = 0u; j < idx.getSize(); ++j )
 		{
 			TriangleToMeshData m;
 			m.submeshIndex = i;
@@ -121,14 +120,16 @@ void Renderer::castDirectLight(const size_t numOfPhotons)
 		FW::Vec3f power = m_triangles[m_lightSources[i]].m_lightPower * 1.f/(float) s;
 		for(auto j = 0u; j < s; ++j)
 		{
-			FW::Vec3f A = *m_triangles[m_lightSources[i]].m_vertices[0];
-			FW::Vec3f B = *m_triangles[m_lightSources[i]].m_vertices[1];
-			FW::Vec3f C = *m_triangles[m_lightSources[i]].m_vertices[2];
-			FW::Vec3f normal = FW::cross(B-A, C-A).normalized();
+			const Triangle& tri = m_triangles[m_lightSources[i]];
+			FW::Vec3f A = *tri.m_vertices[0];
+			FW::Vec3f B = *tri.m_vertices[1];
+			FW::Vec3f C = *tri.m_vertices[2];
 		
 			float sqr_r1 = FW::sqrt(randomGen.getF32(0,1.0f));
 			float r2 = randomGen.getF32(0,1.0f);
 			FW::Vec3f org = (1-sqr_r1)*A + sqr_r1*(1-r2)*B + sqr_r1*r2*C;
+			FW::Vec3f normal = (interpolateAttribute(tri, getDiversion(org,tri), m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
+			normal = normal.normalized();
 			drawTriangleToCamera(org, FW::Vec4f(1.f, 1.f, .0f, 1.f));
 			
 			FW::Vec2f rndUnitSquare = randomGen.getVec2f(0.0f,1.0f);
@@ -142,7 +143,7 @@ void Renderer::castDirectLight(const size_t numOfPhotons)
 			if(!hit.b)
 				continue;
 
-			Photon photon = Photon(hit.intersectionPoint, power, dir, org);
+			Photon photon = Photon(hit.intersectionPoint, power, -(dir.normalized()), org, normal);
 			m_photons.push_back(photon);
 			float r3 = randomGen.getF32(0,1.0f);
 			if(r3 > .5f)
@@ -154,19 +155,21 @@ void Renderer::castDirectLight(const size_t numOfPhotons)
 void Renderer::castIndirectLight(const Photon& previous, const Hit& hit)
 {
 	FW::Random randomGen = FW::Random();
-
-	FW::Vec3f normal = FW::cross((*(hit.triangle.m_vertices[1]) - *(hit.triangle.m_vertices[0])), (*(hit.triangle.m_vertices[2]) - *(hit.triangle.m_vertices[0])));
+	const Triangle& tri = hit.triangle;
+	const TriangleToMeshData* data = (TriangleToMeshData*) hit.triangle.m_userPointer;
+	FW::Vec3f normal = (interpolateAttribute(tri, getDiversion(hit.intersectionPoint,tri), m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
 	normal = normal.normalized();
-	if(FW::dot(normal, previous.dir) < 0)
-		normal *= -1.f;
+	/*if(FW::dot(normal, previous.dir) < 0)
+		normal *= -1.f;*/
 
-	FW::Vec3f L = previous.dir * -1.f;
-	FW::Vec3f mirror = normal * 2 * FW::dot(normal, L) - L;
+	/*FW::Vec3f L = previous.dir * -1.f;
+	FW::Vec3f mirror = normal * 2 * FW::dot(normal, L) - L;*/
 	FW::Vec3f org = previous.pos + 0.001f * normal;
+	drawTriangleToCamera(org, FW::Vec4f(1.f, .0f, .0f, 1.f));
 
 	FW::Vec2f rndUnitSquare = randomGen.getVec2f(0.0f,1.0f);
 	FW::Vec2f rndUnitDisk = toUnitDisk(rndUnitSquare);
-	FW::Mat3f formBasisMat = formBasis(mirror);
+	FW::Mat3f formBasisMat = formBasis(normal);
 	FW::Vec3f rndToUnitHalfSphere = FW::Vec3f(rndUnitDisk.x, rndUnitDisk.y, FW::sqrt(1.0f-(rndUnitDisk.x*rndUnitDisk.x)-(rndUnitDisk.y*rndUnitDisk.y)));
 	FW::Vec3f dir = formBasisMat*rndToUnitHalfSphere;
 
@@ -185,31 +188,36 @@ void Renderer::castIndirectLight(const Photon& previous, const Hit& hit)
 	if(!h.b)
 		return;
 
-	Photon photon = Photon(h.intersectionPoint, power, dir, org);
+	Photon photon = Photon(h.intersectionPoint, power, -(dir.normalized()), org, normal);
+	photon.iDL = true;
 	m_photons.push_back(photon);
 	float r3 = randomGen.getF32(0,1.0f);
-	/*if(r3 > .5f)
-		castIndirectLight(photon, h);*/
+	if(r3 <.5f)
+		castIndirectLight(photon, h);
 }
 
 void Renderer::initPhotonMaping(const size_t numOfPhotons)
 {
 	std::cout << "Starting photon cast..."; 
 	m_photons.clear();
+	m_photonTestMesh->clear();
+	m_photonTestMesh->addSubmesh();
 	castDirectLight(numOfPhotons);
 	m_photonCasted = true;
 	std::cout << "Photon cast done... " << m_photons.size() << " photons total" << std::endl;
+	m_photonTree = RayTracer::get().constructHierarchy(m_photons, m_photonIndexList);
 }
 
 void Renderer::drawPhotonMap()
 {
 	m_photonTestMesh->draw(m_context, m_worldToCamera, m_projection);
-	glLineWidth(.75f);
+	glLineWidth(2.f);
 	glBegin(GL_LINES);
-	FW::Vec3f c;
-	glColor3fv(&c.x);
+	float l = .1f;
 	for (int i = 0; i < m_photons.size(); ++i )
 	{
+		FW::Vec3f c = FW::Vec3f(1.f, .0f, .0f);
+		glColor3fv(&c.x);
 		glVertex3f( m_photons[i].pos.x, m_photons[i].pos.y, m_photons[i].pos.z );
 		glVertex3f( m_photons[i].previouspos.x, m_photons[i].previouspos.y, m_photons[i].previouspos.z );
 	}
@@ -243,4 +251,25 @@ void Renderer::drawTriangleToCamera(const FW::Vec3f& pos, const FW::Vec4f& color
     FW::Array<FW::Vec3i>& indices = m_photonTestMesh->mutableIndices(0);
     for (int i = 0; i < (int)FW_ARRAY_SIZE(indexArray); i++)
         indices.add(indexArray[i] + base);
+}
+
+FW::Vec4f Renderer::interpolateAttribute(const Triangle& tri, const FW::Vec3f& div, const FW::MeshBase* mesh, int attribidx )
+{
+	const TriangleToMeshData* map = (const TriangleToMeshData*)tri.m_userPointer;
+
+	FW::Vec4f v[3];
+	v[0] = mesh->getVertexAttrib( mesh->indices(map->submeshIndex)[map->vertexIndex][0], attribidx );
+	v[1] = mesh->getVertexAttrib( mesh->indices(map->submeshIndex)[map->vertexIndex][1], attribidx );
+	v[2] = mesh->getVertexAttrib( mesh->indices(map->submeshIndex)[map->vertexIndex][2], attribidx );
+	return div.x*v[0] + div.y*v[1] + div.z*v[2];
+}
+
+FW::Vec3f Renderer::getDiversion(const FW::Vec3f& p, const Triangle& tri)
+{
+	float A = (*tri.m_vertices[0] - p).length();
+	float B = (*tri.m_vertices[1] - p).length();
+	float C = (*tri.m_vertices[2] - p).length();
+	float total = A + B + C;
+
+	return FW::Vec3f(A/total, B/total, C/total);
 }
