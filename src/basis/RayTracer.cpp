@@ -372,10 +372,11 @@ bool RayTracer::rayCast(const FW::Vec3f& orig, const FW::Vec3f& dir, Hit& closes
 		return false;
 }
 
-void RayTracer::searchPhotons(const FW::Vec3f& p, const std::vector<Photon>& photons, const std::vector<size_t>& indexList, Node* root, const float r, const size_t numOfPhotons, std::vector<HeapNode>& nodes)
+void RayTracer::searchPhotons(const FW::Vec3f& p, const std::vector<Photon>& photons, const std::vector<size_t>& indexList, Node* root, float& r, const size_t numOfPhotons, std::vector<HeapNode>& nodes)
 {
 	Node* current = root;
 	float range = r;
+	r = 0.f;
 	Node* stack[1028];
 	size_t stackPointer = 0;
 	MaxHeap heap = MaxHeap(numOfPhotons, &nodes);
@@ -401,7 +402,12 @@ void RayTracer::searchPhotons(const FW::Vec3f& p, const std::vector<Photon>& pho
 			float d = (photons[indexList[i]].pos - p).length();
 			heap.pushHeap(indexList[i],d);
 			if(heap.heapIsFull())
+			{
 				range = heap.getMaxValue();
+				r = range;
+			}
+			else
+				r = FW::max(r, d);
 		}
 		if (stackPointer == 0)
 			break;

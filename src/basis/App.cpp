@@ -51,7 +51,7 @@ bool App::handleEvent( const Window::Event& event )
 		break;
 
 	case Action_StartPM:
-		Renderer::get().initPhotonMaping(10000u, m_window.getSize());
+		Renderer::get().initPhotonMaping(1000u, m_window.getSize());
 		break;
 
 	case Action_ShowPMResult:

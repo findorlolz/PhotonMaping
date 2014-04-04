@@ -163,7 +163,7 @@ void Renderer::castDirectLight(const size_t numOfPhotons, const float maxPower)
 			const FW::MeshBase::Material& mat = m_mesh->material(map->submeshIndex);
 			FW::Vec3f albedo = getAlbedo(map, barysHit);
 
-			Photon photon = Photon(hit.intersectionPoint, albedo*pow, -(dir.normalized()));
+			Photon photon = Photon(hit.intersectionPoint, albedo*power, -(dir.normalized()));
 			m_photons.push_back(photon);
 			float r3 = randomGen.getF32(0,1.0f);
 			float threshold = (albedo.x + albedo.y + albedo.z)/3.f;
@@ -218,13 +218,15 @@ void Renderer::initPhotonMaping(const size_t numOfPhotons, const FW::Vec2i& size
 	m_photonTestMesh->addSubmesh();
 	if(m_photonCasted)
 		RayTracer::get().demolishTree(m_photonTree);
-	castDirectLight(numOfPhotons, 4.f);
+	castDirectLight(numOfPhotons, .5f);
 	m_photonCasted = true;
 	std::cout << "Photon cast done... " << m_photons.size() << " photons total" << std::endl;
 	m_photonTree = RayTracer::get().constructHierarchy(m_photons, m_photonIndexList);
-	std::cout << "Create image... " << std::endl;
+	std::cout << "Create image... ";
+	FW::Timer timer;
+	timer.start();
 	createImage(size);
-	std::cout << " done!" << std::endl;
+	std::cout << " done! Time spend: " << timer.getElapsed() << std::endl;
 	m_renderWithPhotonMaping = true;
 }
 
@@ -305,35 +307,31 @@ void Renderer::createImage(const FW::Vec2i& size)
 	FW::Mat4f worldToCamera = m_camera->getWorldToCamera();
 	FW::Mat4f projection = FW::Mat4f::fitToView(FW::Vec2f(-1,-1), FW::Vec2f(2,2), imageSize)*m_camera->getCameraToClip();
 	FW::Mat4f invP = (projection * worldToCamera).inverted();
-	#pragma omp parallel 
-	{
-		#pragma omp for
+	
+	for(int x = 0; x < imageSize.x; ++x)
+	{	
+		#pragma omp parallel for
 		for(int y = 0; y < imageSize.y; ++y)
 		{
-			for (auto x = 0u; x < imageSize.x; ++x )
+			float xP = (x + .5f) / imageSize.x *  2.0f - 1.0f;
+			float yP = (y + .5f) / imageSize.y * -2.0f + 1.0f;
+			FW::Vec4f P0( xP, yP, 0.0f, 1.0f );
+			FW::Vec4f P1( xP, yP, 1.0f, 1.0f );
+			FW::Vec4f Roh = (invP * P0);
+			FW::Vec3f Ro = (Roh * (1.0f / Roh.w)).getXYZ();
+			FW::Vec4f Rdh = (invP * P1);
+			FW::Vec3f Rd = (Rdh * (1.0f / Rdh.w)).getXYZ();
+
+
+			Rd = Rd - Ro;
+			FW::Vec3f E = FW::Vec3f();
+			Hit h = Hit(10.f);
+			if(RayTracer::get().rayCast(Ro, Rd, h, m_triangles, m_indexListFromScene, m_sceneTree))
 			{
-				FW::Vec3f rayOrig, rayDir;
-				FW::Vec2f lensPos = FW::Vec2f(0);
-				float xP = (x + .5f) / imageSize.x *  2.0f - 1.0f;
-				float yP = (y + .5f) / imageSize.y * -2.0f + 1.0f;
-				FW::Vec4f P0( xP, yP, 0.0f, 1.0f );
-				FW::Vec4f P1( xP, yP, 1.0f, 1.0f );
-				FW::Vec4f Roh = (invP * P0);
-				FW::Vec3f Ro = (Roh * (1.0f / Roh.w)).getXYZ();
-				FW::Vec4f Rdh = (invP * P1);
-				FW::Vec3f Rd = (Rdh * (1.0f / Rdh.w)).getXYZ();
-
-
-				Rd = Rd - Ro;
-				FW::Vec3f E = FW::Vec3f();
-				Hit h = Hit(10.f);
-				if(RayTracer::get().rayCast(Ro, Rd, h, m_triangles, m_indexListFromScene, m_sceneTree))
-				{
-					FW::Vec3f albedo = getAlbedo((TriangleToMeshData*) h.triangle.m_userPointer, FW::Vec3f(1.f-h.u-h.v, h.u, h.v));
-					E = albedo * gatherPhotons(h, 10, .1);
-				}
-				m_image->setVec4f(FW::Vec2i(x,y), FW::Vec4f(E, 1.f));
+				FW::Vec3f albedo = getAlbedo((TriangleToMeshData*) h.triangle.m_userPointer, FW::Vec3f(1.f-h.u-h.v, h.u, h.v));
+				E = albedo * gatherPhotons(h, 10, .1);
 			}
+			m_image->setVec4f(FW::Vec2i(x,y), FW::Vec4f(E, 1.f));
 		}
 	}
 }
@@ -403,13 +401,17 @@ FW::Vec3f Renderer::gatherPhotons(const Hit& h, const size_t numOfFGRays, const 
 		if(!RayTracer::get().rayCast(org, dir, hit, m_triangles, m_indexListFromScene, m_sceneTree))
 			continue;
 		std::vector<HeapNode> nodes;
-		RayTracer::get().searchPhotons(hit.intersectionPoint, m_photons, m_photonIndexList, m_photonTree, .4f, 100u, nodes);
+		float r = .4f;
+		RayTracer::get().searchPhotons(hit.intersectionPoint, m_photons, m_photonIndexList, m_photonTree, r, 100u, nodes);
 		FW::Vec3f E = FW::Vec3f();
 		for(auto j = 1u; j < nodes.size(); ++j)
 		{
-			E += m_photons[nodes[j].key].power;
+			float dot = FW::dot(-dir, m_photons[nodes[j].key].dir);
+			if(dot < .0f)
+				continue;
+			E += m_photons[nodes[j].key].power * dot;
 		}
-		total += (E * FW::dot(dir, normal)/((float)nodes.size()-1.f));
+		total += E/(2*FW_PI*r);
 	}
 	total *= 1.f/(float) numOfFGRays; 
 	return total;
