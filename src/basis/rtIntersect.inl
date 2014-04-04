@@ -301,6 +301,19 @@ __forceinline static bool intersect_bb(const float orig[3], const float dirInv[3
 
 }
 
+__forceinline static bool point_intersect_bb(
+			const float orig[3], const float bbMin[3], const float bbMax[3])
+{
+	for(int i = 0; i < 3; ++i)
+	{
+		if(orig[i] < bbMin[i])
+			return false;
+		if(orig[i] > bbMax[i])
+			return false;
+	}
+	return true;
+}
+
 __forceinline static bool intersect_sphere_bb(
 			const float c[3], const float r, 
 			const float min[3], const float max[3] )

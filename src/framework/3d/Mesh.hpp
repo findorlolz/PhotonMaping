@@ -124,6 +124,7 @@ public:
     void                compact             (void);
 
     int                 numVertices         (void) const                    { return m_numVertices; }
+	size_t				numVerticesU		(void) const					{ return (size_t) m_numVertices;}
     int                 vertexStride        (void) const                    { return m_stride; }
     void                resetVertices       (int num);
     void                clearVertices       (void)                          { resizeVertices(0); }

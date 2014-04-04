@@ -14,8 +14,16 @@ enum MeshType
 		MeshType_Cube,
 		MeshType_TestScene,
 		MeshType_Cornell,
+		MeshType_Pheonix,
 
         MeshType_Count
+};
+
+enum ImageType
+{
+	ImageType_PhoenexDiffuse,
+
+	ImageType_Count
 };
 
 class AssetManager
@@ -28,11 +36,14 @@ public:
         void ReleaseAssets();
 
         FW::MeshBase* getMesh(MeshType meshType);
+		FW::Image* getImage(ImageType type);
 		void exportMesh(const const std::string& fileName, FW::MeshBase*);
 
 private:
         FW::MeshBase* importMesh(const std::string& fileName);
+		FW::Image* importImage(const std::string& fileName);
 
-        FW::MeshBase* m_meshes[MeshType_Count];
+        FW::MeshBase*	m_meshes[MeshType_Count];
+		FW::Image*		m_images[ImageType_Count];
 
 };

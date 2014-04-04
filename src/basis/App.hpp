@@ -17,7 +17,8 @@ private:
     enum Action
     {
         Action_None,
-		Action_StartPM
+		Action_StartPM,
+		Action_ShowPMResult
     };
 
 public:

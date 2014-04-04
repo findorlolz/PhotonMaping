@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <assert.h>
+#include <vector>
 
 class Actor;
 
@@ -100,4 +101,40 @@ private:
 	unsigned char* cursor_;
 	size_t size_;
 	omp_lock_t lock_;
+};
+
+struct HeapNode
+{
+	float value;
+	size_t key;
+};
+
+class MaxHeap
+{
+public:
+						MaxHeap				(size_t size, std::vector<HeapNode>*);
+						~MaxHeap			(void);
+	
+	size_t			getMaxKey();
+	float			getMaxValue();
+	size_t			popHeap();
+	void			pushHeap(size_t, float);
+	bool			heapIsFull();
+	size_t			getIndex(size_t i)	const	{ return (*m_array)[i].key;}
+	float			getValue(size_t i)	const	{ return (*m_array)[i].value;}
+	size_t			membersInHeap()	const 	{ return m_heapCounter;} 
+
+private:
+	std::vector<HeapNode>* m_array;
+	size_t				m_size;
+	size_t				m_heapCounter;
+
+	size_t				getParent(size_t i)		{ return i/2; } ;
+	size_t				getRightChild(size_t i)	{ return 2*i+1; };
+	size_t				getLeftChild(size_t i)	{ return 2*i; };
+	bool				isLeaf(size_t i);
+	void				swapNode(size_t i, size_t j);
+	void				balanceTreeRec(size_t i);
+	void				balanceEntireTree();
+	void				balanceEntireTreeRec(size_t i);
 };

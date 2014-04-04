@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include "rtIntersect.inl"
 #include <iostream>
+#include "Memory.h"
 
 Node* RayTracer::constructHierarchy(const std::vector<Triangle>& triangles, std::vector<size_t>& indexList)
 {
@@ -285,12 +286,9 @@ void RayTracer::demolishTree(Node* node)
 bool RayTracer::rayCast(const FW::Vec3f& orig, const FW::Vec3f& dir, Hit& closestHit, const std::vector<Triangle>& triangles, const std::vector<size_t>& indexList, Node* root)
 {
 	Node* current = root;
-	
-	//Basic recursion traverse test
-	//RayTracer::basicTraverseTest(orig, dir, closestHit, current);
 
 	FW::Vec3f dirInv = 1.0f/(dir);
-	Node* stack[128];
+	Node* stack[1028];
 	size_t stackPointer = 0;
 
 	while (true)
@@ -373,6 +371,45 @@ bool RayTracer::rayCast(const FW::Vec3f& orig, const FW::Vec3f& dir, Hit& closes
 	else 
 		return false;
 }
+
+void RayTracer::searchPhotons(const FW::Vec3f& p, const std::vector<Photon>& photons, const std::vector<size_t>& indexList, Node* root, const float r, const size_t numOfPhotons, std::vector<HeapNode>& nodes)
+{
+	Node* current = root;
+	float range = r;
+	Node* stack[1028];
+	size_t stackPointer = 0;
+	MaxHeap heap = MaxHeap(numOfPhotons, &nodes);
+
+	while (true)
+	{
+		// Sphere-BB intersection
+		if ( !intersect_sphere_bb( &(p.x), range, &(current->BBMin.x), &(current->BBMax.x) ) )
+		{
+			if (stackPointer == 0) 
+				break;
+			current = stack[--stackPointer];
+			continue;
+		}
+		if (current->leftChild != nullptr)
+		{
+			stack[stackPointer++] = current->leftChild;
+			current = current->rightChild;
+			continue;
+		}
+		for (size_t i = current->startPrim; i <= current->endPrim; ++i)
+		{
+			float d = (photons[indexList[i]].pos - p).length();
+			heap.pushHeap(indexList[i],d);
+			if(heap.heapIsFull())
+				range = heap.getMaxValue();
+		}
+		if (stackPointer == 0)
+			break;
+		else
+			current = stack[--stackPointer];
+	}			
+}
+
 
 bool RayTracer::isLeaf(Node* node)
 {

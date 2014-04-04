@@ -17,7 +17,7 @@ enum Axis
 
 struct Triangle
 {
-	FW::Vec3f	m_lightPower;
+	float		m_lightPower;
 	FW::Vec3f*	m_vertices[3];
 	void*	    m_userPointer;
 };
@@ -79,15 +79,12 @@ struct Hit
 struct Photon
 {
 	Photon() {}
-	Photon(FW::Vec3f& p, FW::Vec3f& pow, FW::Vec3f& d, FW::Vec3f& pp, FW::Vec3f& n) :
-		pos(p), power(pow), dir(d), previouspos(pp), iDL(false), normal(n) {}
+	Photon(FW::Vec3f& p, FW::Vec3f& pow, FW::Vec3f& d) :
+		pos(p), power(pow), dir(d) {}
 
 	FW::Vec3f pos;
-	FW::Vec3f normal;
-	FW::Vec3f previouspos;
 	FW::Vec3f power;
 	FW::Vec3f dir;
-	bool iDL;
 };
 
 inline static int indexBasedOnFloat(const float size, float value, float& d)

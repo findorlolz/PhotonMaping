@@ -5,7 +5,7 @@
 #include "HelpFunctions.h"
 
 
-typedef FW::Mesh<FW::VertexPNC> MeshC;
+typedef FW::Mesh<FW::VertexPNTC> MeshC;
 
 class RayTracer;
 
@@ -28,8 +28,9 @@ public:
         void shutDown();
 
 		void drawFrame();
-		void initPhotonMaping(const size_t);
+		void initPhotonMaping(const size_t, const FW::Vec2i&);
 		void clearTriangles();
+		void toggleRenderingMode() { m_renderWithPhotonMaping = !m_renderWithPhotonMaping; }
 
 private:
 		std::vector<FW::Vec3f> m_vertices;
@@ -45,7 +46,7 @@ private:
 		FW::Mat4f m_meshScale;
 
 		MeshC* m_mesh;
-		MeshC* m_photonTestMesh;
+		FW::Mesh<FW::VertexPNC>* m_photonTestMesh;
 		FW::Image* m_image;
 
         FW::GLContext* m_context;
@@ -62,7 +63,7 @@ private:
         ~Renderer() {}
 
 		void castIndirectLight(const Photon&, const Hit& hit);
-		void castDirectLight(const size_t);
+		void castDirectLight(const size_t, const float);
 
 		void initTrianglesFromMesh(MeshType, const FW::Vec3f&);
 		void updateTriangleToMeshDataPointers();
@@ -70,6 +71,10 @@ private:
 		void drawTriangleToCamera(const FW::Vec3f& pos, const FW::Vec4f& color);
 		void drawPhotonMap();
 
+		void createImage(const FW::Vec2i& size);
+
 		FW::Vec4f interpolateAttribute(const Triangle& tri, const FW::Vec3f&, const FW::MeshBase* mesh, int attribidx);
 		FW::Vec3f getDiversion(const FW::Vec3f&, const Triangle&);
+		FW::Vec3f getAlbedo(const TriangleToMeshData*, const FW::Vec3f&);
+		FW::Vec3f gatherPhotons(const Hit&, const size_t, const float);
 };

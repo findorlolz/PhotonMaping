@@ -12,6 +12,7 @@ App::App( void ) :
 {
 	m_commonCtrl.showFPS(true);
 	m_commonCtrl.addButton((S32*)&m_action, Action_StartPM, FW_KEY_1, "Start photon maping...");
+	m_commonCtrl.addButton((S32*)&m_action, Action_ShowPMResult, FW_KEY_2, "Render with photon maping...");
 
 	m_window.setTitle("Application");
     m_window.addListener(this);
@@ -50,7 +51,11 @@ bool App::handleEvent( const Window::Event& event )
 		break;
 
 	case Action_StartPM:
-		Renderer::get().initPhotonMaping(1000u);
+		Renderer::get().initPhotonMaping(10000u, m_window.getSize());
+		break;
+
+	case Action_ShowPMResult:
+		Renderer::get().toggleRenderingMode();
 		break;
 
 	default:

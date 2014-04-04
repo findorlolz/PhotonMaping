@@ -333,7 +333,7 @@ void FW::fail(const char* fmt, ...)
     // Running under a debugger => break here.
 
     if (IsDebuggerPresent())
-        __debugbreak();
+		__debugbreak();
 
     // Kill the app.
 
