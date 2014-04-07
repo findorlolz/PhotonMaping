@@ -8,9 +8,22 @@ using namespace FW;
 App::App( void ) : 
 	m_commonCtrl( CommonControls::Feature_Default & ~CommonControls::Feature_RepaintOnF5 ),
 	m_cameraCtrl(&m_commonCtrl, CameraControls::Feature_All),
-	m_action( Action_None )
+	m_action( Action_None ),
+	m_FGRadius(.2f),
+	m_totalLight(100.f),
+	m_numberOfPhotons(1000),
+	m_numberOfFRRays(1)
+
 {
 	m_commonCtrl.showFPS(true);
+	
+	m_commonCtrl.beginSliderStack();
+	m_commonCtrl.addSlider(&m_FGRadius, 0.01f, 1.0f, true, FW_KEY_NONE, FW_KEY_NONE, "Gathering radius = %f");
+	m_commonCtrl.addSlider(&m_totalLight, 10.f, 10000.f, true, FW_KEY_NONE, FW_KEY_NONE, "Total light = %f ");
+	m_commonCtrl.addSlider(&m_numberOfPhotons, 1, 50000, true, FW_KEY_NONE, FW_KEY_NONE, "Number of photons = %d");
+	m_commonCtrl.addSlider(&m_numberOfFRRays, 1, 100, true, FW_KEY_NONE, FW_KEY_NONE, "Number of FG Rays, if zero => no FG = %d ");
+	m_commonCtrl.endSliderStack();
+	
 	m_commonCtrl.addButton((S32*)&m_action, Action_StartPM, FW_KEY_1, "Start photon maping...");
 	m_commonCtrl.addButton((S32*)&m_action, Action_ShowPMResult, FW_KEY_2, "Render with photon maping...");
 
@@ -51,7 +64,7 @@ bool App::handleEvent( const Window::Event& event )
 		break;
 
 	case Action_StartPM:
-		Renderer::get().initPhotonMaping(1000u, m_window.getSize());
+		Renderer::get().initPhotonMaping(m_numberOfPhotons, m_FGRadius, m_numberOfFRRays, m_totalLight, m_window.getSize());
 		break;
 
 	case Action_ShowPMResult:

@@ -15,6 +15,9 @@ void Renderer::startUp(FW::GLContext* gl, FW::CameraControls* camera, AssetManag
 	m_camera->setFar(20.0f);
 	m_camera->setSpeed(4.0f);
 
+	m_randomGen = FW::Random();
+	m_launcher = new FW::MulticoreLauncher();
+
 	m_renderWithPhotonMaping = false;
 	m_photonCasted = false;
 
@@ -114,7 +117,7 @@ void Renderer::updateTriangleToMeshDataPointers()
 		m_triangles[ i ].m_userPointer = &m_triangleToMeshData[i];
 }
 
-void Renderer::castDirectLight(const size_t numOfPhotons, const float maxPower)
+void Renderer::castDirectLight(const size_t numOfPhotons)
 {
 	std::vector<float> areas = std::vector<float> (m_lightSources.size());
 	float total = .0f;
@@ -129,7 +132,8 @@ void Renderer::castDirectLight(const size_t numOfPhotons, const float maxPower)
 	for(auto i = 0u; i < m_lightSources.size(); ++i)
 	{
 		size_t s = numOfPhotons * areas[i]/total + 1u;
-		FW::Vec3f power = m_triangles[m_lightSources[i]].m_lightPower * maxPower;
+		FW::Vec3f power = m_totalLight/((float) numOfPhotons);
+		m_triangles[m_lightSources[i]].m_lightPower = power.x;
 		for(auto j = 0u; j < s; ++j)
 		{
 			const Triangle& tri = m_triangles[m_lightSources[i]];
@@ -143,31 +147,34 @@ void Renderer::castDirectLight(const size_t numOfPhotons, const float maxPower)
 			FW::Vec3f div = getDiversion(org,tri);
 			FW::Vec3f normal = (interpolateAttribute(tri, div, m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
 			normal = normal.normalized();
-			FW::Vec3f pow = power * getAlbedo((TriangleToMeshData*)tri.m_userPointer, div);
 
 			//drawTriangleToCamera(org, FW::Vec4f(pow, 1.f));
 			
-			FW::Vec2f rndUnitSquare = randomGen.getVec2f(0.0f,1.0f);
-			FW::Vec2f rndUnitDisk = toUnitDisk(rndUnitSquare);
-			FW::Mat3f formBasisMat = formBasis(normal);
-			FW::Vec3f rndToUnitHalfSphere = FW::Vec3f(rndUnitDisk.x, rndUnitDisk.y, FW::sqrt(1.0f-(rndUnitDisk.x*rndUnitDisk.x)-(rndUnitDisk.y*rndUnitDisk.y)));
-			FW::Vec3f dir = formBasisMat*rndToUnitHalfSphere;
+			FW::Vec3f dir = randomVectorToHalfUnitSphere(normal, m_randomGen);
 			Hit hit = Hit(10.f);
 			RayTracer::get().rayCast(org, dir, hit, m_triangles, m_indexListFromScene, m_sceneTree);
 			
 			if(!hit.b)
 				continue;
 
+			FW::Vec3f newNormal = (interpolateAttribute(hit.triangle, getDiversion(hit.intersectionPoint,hit.triangle), m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
+			newNormal = newNormal.normalized();
+			FW::Vec3f pow = power * getAlbedo((TriangleToMeshData*)tri.m_userPointer, m_mesh, div) * FW::dot(newNormal, -dir);
+
 			const TriangleToMeshData* map = (const TriangleToMeshData*) hit.triangle.m_userPointer;
 			FW::Vec3f barysHit = FW::Vec3f((1.0f - hit.u - hit.v, hit.u, hit.v));
-			const FW::MeshBase::Material& mat = m_mesh->material(map->submeshIndex);
-			FW::Vec3f albedo = getAlbedo(map, barysHit);
+			FW::Vec3f albedo = getAlbedo(map, m_mesh,barysHit);
 
-			Photon photon = Photon(hit.intersectionPoint, albedo*power, -(dir.normalized()));
+			if(shader(hit, m_mesh) == MaterialPM_Lightsource)
+			{				
+				castIndirectLight(Photon(hit.intersectionPoint, pow, newNormal), hit);
+				continue;
+			}
+			Photon photon = Photon(hit.intersectionPoint, pow, -(dir.normalized()));
 			m_photons.push_back(photon);
-			float r3 = randomGen.getF32(0,1.0f);
+			float r3 = randomGen.getF32(0,1.f);
 			float threshold = (albedo.x + albedo.y + albedo.z)/3.f;
-			if(r3 > threshold)
+			if(r3 < threshold)
 				castIndirectLight(photon, hit);
 		}
 	}
@@ -175,20 +182,14 @@ void Renderer::castDirectLight(const size_t numOfPhotons, const float maxPower)
 
 void Renderer::castIndirectLight(const Photon& previous, const Hit& hit)
 {
-	FW::Random randomGen = FW::Random();
+	FW::Random randomGen = FW::Random(m_photons.size());
 	const Triangle& tri = hit.triangle;
 	const TriangleToMeshData* data = (TriangleToMeshData*) hit.triangle.m_userPointer;
 	FW::Vec3f normal = (interpolateAttribute(tri, getDiversion(hit.intersectionPoint,tri), m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
 	normal = normal.normalized();
 
 	FW::Vec3f org = previous.pos + 0.001f * normal;
-	//drawTriangleToCamera(org, FW::Vec4f(previous.power, 1.f));
-
-	FW::Vec2f rndUnitSquare = randomGen.getVec2f(0.0f,1.0f);
-	FW::Vec2f rndUnitDisk = toUnitDisk(rndUnitSquare);
-	FW::Mat3f formBasisMat = formBasis(normal);
-	FW::Vec3f rndToUnitHalfSphere = FW::Vec3f(rndUnitDisk.x, rndUnitDisk.y, FW::sqrt(1.0f-(rndUnitDisk.x*rndUnitDisk.x)-(rndUnitDisk.y*rndUnitDisk.y)));
-	FW::Vec3f dir = formBasisMat*rndToUnitHalfSphere;
+	FW::Vec3f dir = randomVectorToHalfUnitSphere(normal, randomGen);
 
 	Hit h = Hit(10.f);
 	RayTracer::get().rayCast(org, dir, h, m_triangles, m_indexListFromScene, m_sceneTree);
@@ -197,11 +198,14 @@ void Renderer::castIndirectLight(const Photon& previous, const Hit& hit)
 		return;
 
 	const TriangleToMeshData* map = (const TriangleToMeshData*) hit.triangle.m_userPointer;
-	FW::Vec3f barys = FW::Vec3f((1.0f - hit.u - hit.v, hit.u, hit.v));
+	FW::Vec3f barys = FW::Vec3f((1.0f - h.u - h.v, h.u, h.v));
 	const FW::MeshBase::Material& mat = m_mesh->material(map->submeshIndex);
-	FW::Vec3f albedo = getAlbedo(map, barys);
+	FW::Vec3f albedo = getAlbedo(map, m_mesh,barys);
 
-	FW::Vec3f pow = previous.power * albedo;
+	FW::Vec3f newNormal = (interpolateAttribute(h.triangle, getDiversion(h.intersectionPoint,h.triangle), m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
+	newNormal = newNormal.normalized();
+	FW::Vec3f pow = previous.power * getAlbedo((TriangleToMeshData*)h.triangle.m_userPointer, m_mesh, getDiversion(h.intersectionPoint, h.triangle)) * FW::dot(newNormal, -dir);
+
 	Photon photon = Photon(h.intersectionPoint, pow, -(dir.normalized()));
 	m_photons.push_back(photon);
 	float threshold = (albedo.x + albedo.y + albedo.z)/3.f;
@@ -210,23 +214,26 @@ void Renderer::castIndirectLight(const Photon& previous, const Hit& hit)
 		castIndirectLight(photon, h);
 }
 
-void Renderer::initPhotonMaping(const size_t numOfPhotons, const FW::Vec2i& size)
+void Renderer::initPhotonMaping(const size_t numOfPhotons, const float r, const size_t FG, const float totalLight, const FW::Vec2i& size)
 {
+	m_FGRadius = r;
+	m_numberOfFGRays = FG;
+	m_totalLight = totalLight;
 	std::cout << "Starting photon cast..."; 
 	m_photons.clear();
 	m_photonTestMesh->clear();
 	m_photonTestMesh->addSubmesh();
 	if(m_photonCasted)
 		RayTracer::get().demolishTree(m_photonTree);
-	castDirectLight(numOfPhotons, .5f);
+	castDirectLight(numOfPhotons);
 	m_photonCasted = true;
 	std::cout << "Photon cast done... " << m_photons.size() << " photons total" << std::endl;
 	m_photonTree = RayTracer::get().constructHierarchy(m_photons, m_photonIndexList);
-	std::cout << "Create image... ";
+	std::cout << "Creating image... " << std::endl;
 	FW::Timer timer;
 	timer.start();
 	createImage(size);
-	std::cout << " done! Time spend: " << timer.getElapsed() << std::endl;
+	std::cout << " done!  Time spend: " << timer.getElapsed() << std::endl;
 	m_renderWithPhotonMaping = true;
 }
 
@@ -298,8 +305,8 @@ FW::Vec3f Renderer::getDiversion(const FW::Vec3f& p, const Triangle& tri)
 
 void Renderer::createImage(const FW::Vec2i& size)
 {
-	if(!m_photonCasted)
-		return;
+	if(m_renderWithPhotonMaping)
+		delete m_image;
 
 	m_image = new FW::Image(size, FW::ImageFormat::RGBA_Vec4f);
 	FW::Vec2i imageSize = m_image->getSize();
@@ -308,49 +315,87 @@ void Renderer::createImage(const FW::Vec2i& size)
 	FW::Mat4f projection = FW::Mat4f::fitToView(FW::Vec2f(-1,-1), FW::Vec2f(2,2), imageSize)*m_camera->getCameraToClip();
 	FW::Mat4f invP = (projection * worldToCamera).inverted();
 	
+	m_scanlineContext.d_invP = invP;
+	m_scanlineContext.d_numberOfFGRays=  m_numberOfFGRays;
+	m_scanlineContext.d_FGRadius=  m_FGRadius;
+	m_scanlineContext.d_totalLight=  m_totalLight;
+	m_scanlineContext.d_vertices = &m_vertices;
+	m_scanlineContext.d_triangles = &m_triangles;
+	m_scanlineContext.d_triangleToMeshData = &m_triangleToMeshData;
+	m_scanlineContext.d_indexListFromScene = &m_indexListFromScene;
+	m_scanlineContext.d_photons = &m_photons;
+	m_scanlineContext.d_photonIndexList = &m_photonIndexList;
+	m_scanlineContext.d_image = m_image;
+	m_scanlineContext.d_mesh = m_mesh;
+	m_scanlineContext.d_sceneTree = m_sceneTree;
+	m_scanlineContext.d_photonTree = m_photonTree;	
+
+	m_launcher->setNumThreads(m_launcher->getNumCores());	// the solution exe is multithreaded
+	//m_launcher.setNumThreads(1);
+	m_launcher->popAll();
+	m_launcher->push(imageScanline, &m_scanlineContext, 0, imageSize.y );
+	while(m_launcher->getNumFinished() != m_launcher->getNumTasks())
+	{
+		printf("~ %.2f %% \r", 100.0f*m_launcher->getNumFinished()/(float)m_launcher->getNumTasks());
+	}
+	m_launcher->popAll();
+}
+
+void Renderer::imageScanline(FW::MulticoreLauncher::Task& t)
+{
+	scanlineData& data = *(scanlineData*)t.data;
+
+	const int y = t.idx;
+	const FW::Vec2f imageSize = data.d_image->getSize();
+
 	for(int x = 0; x < imageSize.x; ++x)
 	{	
-		#pragma omp parallel for
-		for(int y = 0; y < imageSize.y; ++y)
+		const float yP = (y + .5f) / imageSize.y * -2.0f + 1.0f;
+		const float xP = (x + .5f) / imageSize.x *  2.0f - 1.0f;
+		FW::Vec4f P0( xP, yP, 0.0f, 1.0f );
+		FW::Vec4f P1( xP, yP, 1.0f, 1.0f );
+		FW::Vec4f Roh = (data.d_invP * P0);
+		FW::Vec3f Ro = (Roh * (1.0f / Roh.w)).getXYZ();
+		FW::Vec4f Rdh = (data.d_invP * P1);
+		FW::Vec3f Rd = (Rdh * (1.0f / Rdh.w)).getXYZ();
+
+
+		Rd = Rd - Ro;
+		FW::Vec3f E = FW::Vec3f();
+		Hit h = Hit(10.f);
+		if(RayTracer::get().rayCast(Ro, Rd, h, *data.d_triangles, *data.d_indexListFromScene, data.d_sceneTree))
 		{
-			float xP = (x + .5f) / imageSize.x *  2.0f - 1.0f;
-			float yP = (y + .5f) / imageSize.y * -2.0f + 1.0f;
-			FW::Vec4f P0( xP, yP, 0.0f, 1.0f );
-			FW::Vec4f P1( xP, yP, 1.0f, 1.0f );
-			FW::Vec4f Roh = (invP * P0);
-			FW::Vec3f Ro = (Roh * (1.0f / Roh.w)).getXYZ();
-			FW::Vec4f Rdh = (invP * P1);
-			FW::Vec3f Rd = (Rdh * (1.0f / Rdh.w)).getXYZ();
+			FW::Vec3f albedo = getAlbedo((TriangleToMeshData*) h.triangle.m_userPointer, data.d_mesh, FW::Vec3f(1.f-h.u-h.v, h.u, h.v));				
 
-
-			Rd = Rd - Ro;
-			FW::Vec3f E = FW::Vec3f();
-			Hit h = Hit(10.f);
-			if(RayTracer::get().rayCast(Ro, Rd, h, m_triangles, m_indexListFromScene, m_sceneTree))
+			if(shader(h, data.d_mesh) == MaterialPM_Lightsource)
 			{
-				FW::Vec3f albedo = getAlbedo((TriangleToMeshData*) h.triangle.m_userPointer, FW::Vec3f(1.f-h.u-h.v, h.u, h.v));
-				E = albedo * gatherPhotons(h, 10, .1);
+				E = ((*data.d_triangles)[h.i]).m_lightPower * data.d_totalLight * albedo * .01f; 
 			}
-			m_image->setVec4f(FW::Vec2i(x,y), FW::Vec4f(E, 1.f));
+			else
+			{
+				FW::Vec3f dir = (-Rd).normalized();
+				E = albedo * gatherPhotons(h,dir,data);
+			}
 		}
+		data.d_image->setVec4f(FW::Vec2i(x,y), FW::Vec4f(E, 1.f));
 	}
 }
 
-FW::Vec3f Renderer::getAlbedo(const TriangleToMeshData* map, const FW::Vec3f& barys )
+FW::Vec3f Renderer::getAlbedo(const TriangleToMeshData* map, const MeshC* mesh, const FW::Vec3f& barys )
 {
 	FW::Vec3f Kd;
-	const FW::MeshBase::Material& mat = m_mesh->material(map->submeshIndex);
+	const FW::MeshBase::Material& mat = mesh->material(map->submeshIndex);
 	if ( mat.textures[FW::MeshBase::TextureType_Diffuse].exists() )
 	{
 		const FW::Texture& tex = mat.textures[FW::MeshBase::TextureType_Diffuse];
 		const FW::Image& teximg = *tex.getImage();
-		FW::Vec3f indices = m_mesh->indices(map->submeshIndex)[map->vertexIndex];
+		FW::Vec3f indices = mesh->indices(map->submeshIndex)[map->vertexIndex];
 
-		int attribidx = m_mesh->findAttrib(FW::MeshBase::AttribType_TexCoord); 
+		int attribidx = mesh->findAttrib(FW::MeshBase::AttribType_TexCoord); 
 		FW::Vec2f v[3];
-		v[0] = m_mesh->getVertexAttrib( indices[0], attribidx ).getXY();
-		v[1] = m_mesh->getVertexAttrib( indices[1], attribidx ).getXY();
-		v[2] = m_mesh->getVertexAttrib( indices[2], attribidx ).getXY();
+		v[0] = mesh->getVertexAttrib( indices[0], attribidx ).getXY();
+		v[1] = mesh->getVertexAttrib( indices[1], attribidx ).getXY();
+		v[2] = mesh->getVertexAttrib( indices[2], attribidx ).getXY();
 		FW::Vec2f UV = barys[0]*v[0] + barys[1]*v[1] + barys[2]*v[2];
 
 		FW::Vec2i imageSize = teximg.getSize();
@@ -379,41 +424,72 @@ FW::Vec3f Renderer::getAlbedo(const TriangleToMeshData* map, const FW::Vec3f& ba
 	return Kd;
 }
 
-FW::Vec3f Renderer::gatherPhotons(const Hit& h, const size_t numOfFGRays, const float r)
+FW::Vec3f Renderer::gatherPhotons(const Hit& h, const FW::Vec3f& dir, const scanlineData& data)
 {
-	FW::Random randomGen = FW::Random();
 	const Triangle& tri = h.triangle;
-	const TriangleToMeshData* data = (TriangleToMeshData*) h.triangle.m_userPointer;
-	FW::Vec3f normal = (interpolateAttribute(tri, getDiversion(h.intersectionPoint,tri), m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
+	const TriangleToMeshData* meshData = (TriangleToMeshData*) h.triangle.m_userPointer;
+	FW::Vec3f normal = (interpolateAttribute(tri, getDiversion(h.intersectionPoint,tri), data.d_mesh, data.d_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
 	normal = normal.normalized();
 	FW::Vec3f org = h.intersectionPoint + 0.001f * normal;
 	FW::Vec3f total;
-
-	for(auto i = 0u; i < numOfFGRays; ++i)
+	FW::Random random = FW::Random();
+	if(data.d_numberOfFGRays == 1)
 	{
-		FW::Vec2f rndUnitSquare = randomGen.getVec2f(0.0f,1.0f);
-		FW::Vec2f rndUnitDisk = toUnitDisk(rndUnitSquare);
-		FW::Mat3f formBasisMat = formBasis(normal);
-		FW::Vec3f rndToUnitHalfSphere = FW::Vec3f(rndUnitDisk.x, rndUnitDisk.y, FW::sqrt(1.0f-(rndUnitDisk.x*rndUnitDisk.x)-(rndUnitDisk.y*rndUnitDisk.y)));
-		FW::Vec3f dir = formBasisMat*rndToUnitHalfSphere;
-
-		Hit hit = Hit(10.f);
-		if(!RayTracer::get().rayCast(org, dir, hit, m_triangles, m_indexListFromScene, m_sceneTree))
-			continue;
 		std::vector<HeapNode> nodes;
-		float r = .4f;
-		RayTracer::get().searchPhotons(hit.intersectionPoint, m_photons, m_photonIndexList, m_photonTree, r, 100u, nodes);
+		float r = data.d_FGRadius;
+		RayTracer::get().searchPhotons(h.intersectionPoint, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, 100u, nodes);
 		FW::Vec3f E = FW::Vec3f();
 		for(auto j = 1u; j < nodes.size(); ++j)
 		{
-			float dot = FW::dot(-dir, m_photons[nodes[j].key].dir);
+			float dot = FW::dot(dir, (*data.d_photons)[nodes[j].key].dir);
 			if(dot < .0f)
 				continue;
-			E += m_photons[nodes[j].key].power * dot;
+			E += (*data.d_photons)[nodes[j].key].power * dot;
 		}
-		total += E/(2*FW_PI*r);
+		return E/(2*r*FW_PI);
 	}
-	total *= 1.f/(float) numOfFGRays; 
-	return total;
+	else
+	{
+		for(auto i = 0u; i < data.d_numberOfFGRays; ++i)
+		{			
+			FW::Vec3f dir = randomVectorToHalfUnitSphere(normal, random);
+
+			Hit hit = Hit(10.f);
+			if(!RayTracer::get().rayCast(org, dir, hit, *data.d_triangles, *data.d_indexListFromScene, data.d_sceneTree))
+				continue;
+			std::vector<HeapNode> nodes;
+			float r = data.d_FGRadius;
+			RayTracer::get().searchPhotons(hit.intersectionPoint, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, 100u, nodes);
+			FW::Vec3f E = FW::Vec3f();
+			for(auto j = 1u; j < nodes.size(); ++j)
+			{
+				float dot = FW::dot(-dir, (*data.d_photons)[nodes[j].key].dir);
+				if(dot < .0f)
+					continue;
+				E += (*data.d_photons)[nodes[j].key].power * dot;
+			}
+			total += E/(2*r*FW_PI);
+		}
+		total *= 1.f/(float) data.d_numberOfFGRays; 
+		return total;
+	}
 };
 
+MaterialPM Renderer::shader(const Hit& h, MeshC* mesh)
+{
+	const TriangleToMeshData* data = (TriangleToMeshData*) h.triangle.m_userPointer;
+	const FW::MeshBase::Material mat = mesh->material(data->submeshIndex);
+	if(mat.specular == FW::Vec3f())
+		return  MaterialPM_Lightsource;
+	else
+		return MaterialPM_Diffuse; 
+}
+
+FW::Vec3f Renderer::randomVectorToHalfUnitSphere(const FW::Vec3f& vec, FW::Random& r)
+{
+		FW::Vec2f rndUnitSquare = r.getVec2f(0.0f,1.0f);
+		FW::Vec2f rndUnitDisk = toUnitDisk(rndUnitSquare);
+		FW::Mat3f formBasisMat = formBasis(vec);
+		FW::Vec3f rndToUnitHalfSphere = FW::Vec3f(rndUnitDisk.x, rndUnitDisk.y, FW::sqrt(1.0f-(rndUnitDisk.x*rndUnitDisk.x)-(rndUnitDisk.y*rndUnitDisk.y)));
+		return formBasisMat*rndToUnitHalfSphere;	
+}

@@ -36,6 +36,10 @@ private:
 	CameraControls	m_cameraCtrl;
 	Action m_action;
 
+	float m_FGRadius;
+	float m_totalLight;
+	int m_numberOfPhotons;
+	int m_numberOfFRRays;
 	Renderer* m_renderer;
 	AssetManager* m_assetManager;
 
