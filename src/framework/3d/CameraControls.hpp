@@ -93,6 +93,7 @@ public:
     Mat4f               getWorldToClip      (void) const        { return getCameraToClip() * getWorldToCamera(); }
     Mat4f               getCameraToLeftEye  (void) const        { Mat4f m; m.m02 = m_stereoConvergence; m.m03 = m_stereoSeparation; return m; }
     Mat4f               getCameraToRightEye (void) const        { return getCameraToLeftEye().inverted(); }
+	bool				getEnableMovement	(void) const		{ return m_enableMovement; }
 
     void                setCameraToWorld    (const Mat4f& m);   // Sets position & forward, and up if !keepAligned.
     void                setWorldToCamera    (const Mat4f& m)    { setCameraToWorld(invert(m)); }

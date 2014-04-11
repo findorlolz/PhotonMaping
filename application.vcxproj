@@ -345,6 +345,7 @@
     <ClInclude Include="src\basis\Memory.h" />
     <ClInclude Include="src\basis\RayTracer.h" />
     <ClInclude Include="src\basis\Renderer.h" />
+    <ClInclude Include="src\basis\Sampling.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\basis\App.cpp" />

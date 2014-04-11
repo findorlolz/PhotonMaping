@@ -85,6 +85,7 @@ struct Photon
 	FW::Vec3f pos;
 	FW::Vec3f power;
 	FW::Vec3f dir;
+	FW::Vec3f E;
 };
 
 inline static int indexBasedOnFloat(const float size, float value, float& d)

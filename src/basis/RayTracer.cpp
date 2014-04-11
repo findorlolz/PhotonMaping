@@ -31,7 +31,7 @@ Node* RayTracer::constructHierarchy(const std::vector<Photon>& photons, std::vec
 	Node* root = new Node();	
 	
 	createIndexList(indexList, size);
-	constructTree(0, size-1 , root, root, indexList, photons);
+	constructTree(0, size-1 , root, root, indexList, photons, .25f);
 
 	std::cout << "done!" << std::endl;
 	return root;
@@ -126,8 +126,10 @@ void RayTracer::constructTree(size_t startPrim, size_t endPrim, Node* node, Node
 	}
 }
 
-void RayTracer::constructTree(size_t startPrim, size_t endPrim, Node* node, Node* root, std::vector<size_t>& indexList, const std::vector<Photon>& photons)
+void RayTracer::constructTree(size_t startPrim, size_t endPrim, Node* node, Node* root, std::vector<size_t>& indexList, const std::vector<Photon>& photons, const float f)
 {
+	FW_ASSERT(f < .5f && f >= 0 && "SAH float error input error");
+
 	node->startPrim = startPrim;
 	node->endPrim = endPrim;
 	
@@ -146,9 +148,12 @@ void RayTracer::constructTree(size_t startPrim, size_t endPrim, Node* node, Node
 			node->BBMax = max(node->BBMax, photons[indexList[prim]].pos);
 		}
 	}
-
+	
 	if ((endPrim - startPrim) + 1 > 8)
 	{
+		size_t forced = f * (endPrim - startPrim + 1);
+		size_t sPrim = startPrim + forced;
+		size_t ePrim = endPrim - forced;
 		const size_t bbSize = (endPrim - startPrim + 1);
 		const size_t index = bbSize - 1;
 		float tmpSAH = FLT_MAX;
@@ -182,6 +187,9 @@ void RayTracer::constructTree(size_t startPrim, size_t endPrim, Node* node, Node
 			sortedIndices[index][i] = indexList[startPrim+index];
 			for(auto j = 0u; j < index; ++j)
 			{
+				int p = startPrim + j;
+				if(p < sPrim || p > ePrim)
+					continue;
 				float SAH = boundingBoxesL[j].area * (float)(j+1)  + boundingBoxesR[j].area * (float)(index - j);
 				if(SAH < tmpSAH)
 				{
@@ -196,22 +204,22 @@ void RayTracer::constructTree(size_t startPrim, size_t endPrim, Node* node, Node
 			}
 		}
 
-		//std::cout << "SAH: " << tmpSAH << " index " << tmpSAHindex << " Axis: " << tmpSAHAxis << std::endl;
 		node->axis = (Axis)tmpSAHAxis;
 		node->leftChild = leftNode;
 		node->rightChild = rightNode;
 
 		size_t t = 0;
-		for (auto i = startPrim; i <= endPrim; i++)
+		for (auto i = sPrim; i <= ePrim; i++)
 		{
 			indexList[i] = sortedIndices[t][tmpSAHAxis]; 
 			t++;
 		}
 
-		size_t split = startPrim + tmpSAHindex;
+		size_t split = sPrim + tmpSAHindex;
+		//std::cout << "SAH: " << tmpSAH << " index " << startPrim << "/" << sPrim << "-" << split << "-" << ePrim  << "/" << endPrim << " Axis: " << tmpSAHAxis << std::endl;
 			
-		constructTree(startPrim, split, leftNode, root, indexList, photons);
-		constructTree(split + 1, endPrim, rightNode, root, indexList, photons);
+		constructTree(startPrim, split, leftNode, root, indexList, photons, f);
+		constructTree(split + 1, endPrim, rightNode, root, indexList, photons, f);
 	}
 }
 
@@ -283,12 +291,11 @@ void RayTracer::demolishTree(Node* node)
 
 }
 
-bool RayTracer::rayCast(const FW::Vec3f& orig, const FW::Vec3f& dir, Hit& closestHit, const std::vector<Triangle>& triangles, const std::vector<size_t>& indexList, Node* root)
+bool RayTracer::rayCast(const FW::Vec3f& orig, const FW::Vec3f& dir, Hit& closestHit, const std::vector<Triangle>& triangles, const std::vector<size_t>& indexList, Node* root, Node** stack)
 {
 	Node* current = root;
 
 	FW::Vec3f dirInv = 1.0f/(dir);
-	Node* stack[1028];
 	size_t stackPointer = 0;
 
 	while (true)
@@ -372,12 +379,11 @@ bool RayTracer::rayCast(const FW::Vec3f& orig, const FW::Vec3f& dir, Hit& closes
 		return false;
 }
 
-void RayTracer::searchPhotons(const FW::Vec3f& p, const std::vector<Photon>& photons, const std::vector<size_t>& indexList, Node* root, float& r, const size_t numOfPhotons, std::vector<HeapNode>& nodes)
+void RayTracer::searchPhotons(const FW::Vec3f& p, const std::vector<Photon>& photons, const std::vector<size_t>& indexList, Node* root, float& r, const size_t numOfPhotons, std::vector<HeapNode>& nodes, Node** stack)
 {
 	Node* current = root;
 	float range = r;
 	r = 0.f;
-	Node* stack[1028];
 	size_t stackPointer = 0;
 	MaxHeap heap = MaxHeap(numOfPhotons, &nodes);
 

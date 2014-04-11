@@ -9,6 +9,7 @@
 typedef FW::Mesh<FW::VertexPNTC> MeshC;
 
 class RayTracer;
+class Sampling;
 
 enum MaterialPM
 {
@@ -46,8 +47,9 @@ private:
 		 Renderer() {}
         ~Renderer() {}
 
-		void castIndirectLight(const Photon&, const Hit& hit);
+		void castIndirectLight(const Photon&, const Hit& hit, Node**);
 		void castDirectLight(const size_t);
+		void preCalculateOutgoingLight();
 
 		void initTrianglesFromMesh(MeshType, const FW::Vec3f&);
 		void updateTriangleToMeshDataPointers();
@@ -81,7 +83,7 @@ private:
 		static FW::Vec3f getAlbedo(const TriangleToMeshData*, const MeshC*, const FW::Vec3f&);
 		static FW::Vec3f randomVectorToHalfUnitSphere(const FW::Vec3f&, FW::Random&);
 		
-		static FW::Vec3f gatherPhotons(const Hit&, const FW::Vec3f&, const scanlineData&);
+		static FW::Vec3f gatherPhotons(const Hit&, const FW::Vec3f&, const scanlineData&, Node**);
 
 		static MaterialPM shader(const Hit&, MeshC*);
 
@@ -98,10 +100,6 @@ private:
 		FW::Mat4f m_projection;
 		FW::Mat4f m_worldToCamera;
 		FW::Mat4f m_meshScale;
-
-		size_t m_numberOfFGRays;
-		float m_FGRadius;
-		float m_totalLight;
 
 		FW::MulticoreLauncher* m_launcher;
 		scanlineData m_scanlineContext;

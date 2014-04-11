@@ -18,7 +18,9 @@ private:
     {
         Action_None,
 		Action_StartPM,
-		Action_ShowPMResult
+		Action_ShowPMResult,
+		Action_ChangeCameraState,
+		Action_EnableCamera
     };
 
 public:
@@ -26,6 +28,7 @@ public:
 	virtual ~App( void ) {}
 	virtual bool handleEvent( const Window::Event& event );
 
+	void updateAppState();
 private:
 	App( const App& ); // forbidden
     App& operator=( const App& ); // forbidden
@@ -40,9 +43,13 @@ private:
 	float m_totalLight;
 	int m_numberOfPhotons;
 	int m_numberOfFRRays;
+	int m_numberOfSamplesPerDimension;
+
 	Renderer* m_renderer;
 	AssetManager* m_assetManager;
 
+	bool m_visibleCameraControls;
+	bool m_stateChange;
 };
 
 }
