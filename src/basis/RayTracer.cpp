@@ -44,7 +44,6 @@ void RayTracer::constructTree(size_t startPrim, size_t endPrim, Node* node, Node
 	
 	node->leftChild = NULL;
 	node->rightChild = NULL;
-	Axis axis;
 
 	if (node == root)
 	{
@@ -209,7 +208,7 @@ void RayTracer::constructTree(size_t startPrim, size_t endPrim, Node* node, Node
 		node->rightChild = rightNode;
 
 		size_t t = 0;
-		for (auto i = sPrim; i <= ePrim; i++)
+		for (auto i = startPrim; i <= endPrim; i++)
 		{
 			indexList[i] = sortedIndices[t][tmpSAHAxis]; 
 			t++;
@@ -320,7 +319,6 @@ bool RayTracer::rayCast(const FW::Vec3f& orig, const FW::Vec3f& dir, Hit& closes
 							closestHit.t = t;
 							closestHit.u = u;
 							closestHit.v = v;
-							closestHit.b = true;
 						}
 					}
 				}
@@ -369,7 +367,7 @@ bool RayTracer::rayCast(const FW::Vec3f& orig, const FW::Vec3f& dir, Hit& closes
 	}				//while-loop
 	
 	//std::cout << "end" <<std::endl;
-	if(closestHit.b)
+	if(closestHit.i != -1)
 	{
 		closestHit.intersectionPoint = orig + closestHit.t*dir;
 		closestHit.triangle = triangles[closestHit.i];
@@ -382,15 +380,13 @@ bool RayTracer::rayCast(const FW::Vec3f& orig, const FW::Vec3f& dir, Hit& closes
 void RayTracer::searchPhotons(const FW::Vec3f& p, const std::vector<Photon>& photons, const std::vector<size_t>& indexList, Node* root, float& r, const size_t numOfPhotons, std::vector<HeapNode>& nodes, Node** stack)
 {
 	Node* current = root;
-	float range = r;
-	r = 0.f;
 	size_t stackPointer = 0;
 	MaxHeap heap = MaxHeap(numOfPhotons, &nodes);
 
 	while (true)
 	{
 		// Sphere-BB intersection
-		if ( !intersect_sphere_bb( &(p.x), range, &(current->BBMin.x), &(current->BBMax.x) ) )
+		if ( !intersect_sphere_bb( &(p.x), r, &(current->BBMin.x), &(current->BBMax.x) ) )
 		{
 			if (stackPointer == 0) 
 				break;
@@ -406,20 +402,57 @@ void RayTracer::searchPhotons(const FW::Vec3f& p, const std::vector<Photon>& pho
 		for (size_t i = current->startPrim; i <= current->endPrim; ++i)
 		{
 			float d = (photons[indexList[i]].pos - p).length();
+			if(d > r)
+				continue;
 			heap.pushHeap(indexList[i],d);
 			if(heap.heapIsFull())
 			{
-				range = heap.getMaxValue();
-				r = range;
+				r = heap.getMaxKey();
 			}
-			else
-				r = FW::max(r, d);
 		}
 		if (stackPointer == 0)
 			break;
 		else
 			current = stack[--stackPointer];
 	}			
+}
+
+int RayTracer::findNearestPhoton(const FW::Vec3f& p, const std::vector<Photon>& photons, const std::vector<size_t>& indexList, Node* root, float& r, Node** stack)
+{
+	Node* current = root;
+	size_t stackPointer = 0;
+	int index = -1;
+
+	while (true)
+	{
+		if ( !intersect_sphere_bb( &(p.x), r, &(current->BBMin.x), &(current->BBMax.x) ) )
+		{
+			if (stackPointer == 0) 
+				break;
+			current = stack[--stackPointer];
+			continue;
+		}
+		if (current->leftChild != nullptr)
+		{
+			stack[stackPointer++] = current->leftChild;
+			current = current->rightChild;
+			continue;
+		}
+		for (size_t i = current->startPrim; i <= current->endPrim; ++i)
+		{
+			float d = (photons[indexList[i]].pos - p).length();
+			if(d < r)
+			{
+				index = indexList[i];
+				r = d;
+			}
+		}
+		if (stackPointer == 0)
+			break;
+		else
+			current = stack[--stackPointer];
+	}
+	return index;
 }
 
 

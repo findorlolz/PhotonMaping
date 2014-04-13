@@ -73,7 +73,7 @@ bool App::handleEvent( const Window::Event& event )
 		break;
 
 	case Action_StartPM:
-		Renderer::get().initPhotonMaping(m_numberOfPhotons, m_FGRadius, m_numberOfFRRays, m_totalLight, m_window.getSize());
+		Renderer::get().initPhotonMaping(m_numberOfPhotons, m_FGRadius, m_numberOfFRRays, m_totalLight, m_numberOfSamplesPerDimension, m_window.getSize());
 		break;
 
 	case Action_ShowPMResult:

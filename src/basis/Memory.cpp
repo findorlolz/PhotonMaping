@@ -27,30 +27,33 @@ omp_guard::~omp_guard ()
 
 MaxHeap::MaxHeap(size_t size, std::vector<HeapNode>* ptr)
 {
-	m_size = size+1;
-	m_heapCounter = 1;
+	m_size = size;
+	m_nextIndex = 1;
 	m_array = ptr;
-	(*m_array).reserve(m_size);
-	(*m_array).push_back(HeapNode());
+	(*m_array).reserve(m_size+1);
+	HeapNode tmp;
+	tmp.key = -1337;
+	tmp.value = 1337;
+	(*m_array).push_back(tmp);
 }
 
 MaxHeap::~MaxHeap()
 {
 }
 
-size_t MaxHeap::getMaxKey()
+float MaxHeap::getMaxKey()
 {
 	return (*m_array)[1].key;
 }
 
-float MaxHeap::getMaxValue()
+size_t MaxHeap::getMaxValue()
 {
 	return (*m_array)[1].value;
 }
 
 bool MaxHeap::heapIsFull()
 {
-	if (m_heapCounter == m_size)
+	if (m_nextIndex > m_size)
 		return true;
 	else
 		return false;
@@ -58,7 +61,7 @@ bool MaxHeap::heapIsFull()
 
 bool MaxHeap::isLeaf(size_t i)
 {
-	if (getLeftChild(i) > m_heapCounter)
+	if (getLeftChild(i) > m_nextIndex)
 		return true;
 	else
 		return false;
@@ -70,12 +73,12 @@ void MaxHeap::balanceTreeRec(size_t i)
 	size_t r = getRightChild(i);
 	size_t greatest;
 
-	if (l < m_heapCounter && (*m_array)[l].value > (*m_array)[i].value)
+	if (l < m_nextIndex && (*m_array)[l].key > (*m_array)[i].key)
 		greatest = l;
 	else
 		greatest = i;
 
-	if (r < m_heapCounter && (*m_array)[l].value < (*m_array)[greatest].value)
+	if (r < m_nextIndex && (*m_array)[r].key > (*m_array)[greatest].key)
 		greatest = r;
 
 	if (greatest != i)
@@ -85,26 +88,29 @@ void MaxHeap::balanceTreeRec(size_t i)
 	}
 }
 
-void MaxHeap::pushHeap(size_t key, float value)
+bool MaxHeap::pushHeap(size_t value, float key)
 {
 	if (heapIsFull())
 	{
-		if(value > getMaxValue())
-			return;
+		if(key > getMaxKey())
+			return false;
 		HeapNode node = HeapNode();
 		node.key = key;
 		node.value = value;
-		(*m_array)[1] = node;
+		swapNode(1,m_nextIndex-1);
+		(*m_array)[m_nextIndex-1] = node;
 		balanceTreeRec(1);
+		return true;
 	}
-	else if (m_heapCounter == m_size - 1)
+	else if (m_nextIndex == m_size)
 	{
 		HeapNode node = HeapNode();
 		node.key = key;
 		node.value = value;
 		(*m_array).push_back(node);
-		m_heapCounter++;
+		m_nextIndex++;
 		balanceEntireTree();
+		return true;
 	}
 	else
 	{
@@ -112,15 +118,16 @@ void MaxHeap::pushHeap(size_t key, float value)
 		node.key = key;
 		node.value = value;
 		(*m_array).push_back(node);
-		m_heapCounter++;
+		m_nextIndex++;
+		return true;
 	}
 }
 
 void MaxHeap::swapNode(size_t i, size_t j)
 {
-	(*m_array)[0] = (*m_array)[i];
+	HeapNode tmp = (*m_array)[i];
 	(*m_array)[i] = (*m_array)[j];
-	(*m_array)[j] = (*m_array)[0];
+	(*m_array)[j] = tmp;
 }
 
 void MaxHeap::balanceEntireTree()

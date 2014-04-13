@@ -23,21 +23,16 @@ public:
     }
 
 
-	void		startUp(int numberOfCores) 
-	{ 
-		m_random = FW::Random();
-	}
-	void		shutDown() 
-	{ 
-		delete &get(); 
-	}
+	void		startUp() { m_random = FW::Random(); }
+	void		shutDown() { delete &get(); }
 
 	Node*		constructHierarchy		(const std::vector<Triangle>&, std::vector<size_t>&);
 	Node*		constructHierarchy		(const std::vector<Photon>&, std::vector<size_t>&);
-	void		demolishTree			(Node*);	
-	bool		rayCast					(const FW::Vec3f&, const FW::Vec3f&, Hit&, const std::vector<Triangle>&, const std::vector<size_t>&, Node*, Node**);
+	void		demolishTree			(Node*);
 
+	bool		rayCast(const FW::Vec3f&, const FW::Vec3f&, Hit&, const std::vector<Triangle>&, const std::vector<size_t>&, Node*, Node**);
 	void		searchPhotons(const FW::Vec3f&, const std::vector<Photon>&, const std::vector<size_t>&, Node*, float&, const size_t, std::vector<HeapNode>&, Node**);
+	int		findNearestPhoton(const FW::Vec3f&, const std::vector<Photon>&, const std::vector<size_t>&, Node*, float&, Node**);
 
 private:
 	void		constructTree(size_t, size_t, Node*, Node*, std::vector<size_t>&);

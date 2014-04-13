@@ -6,6 +6,7 @@
 
 void Renderer::startUp(FW::GLContext* gl, FW::CameraControls* camera, AssetManager* assetManager)
 {
+	std::cout << "Starting up the Renderer..." << std::endl;
 	m_context = gl; 
     m_assetManager = assetManager;
 	m_camera = camera;
@@ -25,7 +26,7 @@ void Renderer::startUp(FW::GLContext* gl, FW::CameraControls* camera, AssetManag
 
 	m_mesh = new MeshC();
 	m_mesh->append(*(m_assetManager->getMesh(MeshType_Cornell)));
-	m_mesh->append(*m_assetManager->getMesh(MeshType_Pheonix));
+	m_mesh->append(*m_assetManager->getMesh(MeshType_Cube));
 	m_photonTestMesh = new FW::Mesh<FW::VertexPNC>();
 	m_photonTestMesh->addSubmesh();
 	updateTriangleToMeshDataPointers();
@@ -33,9 +34,14 @@ void Renderer::startUp(FW::GLContext* gl, FW::CameraControls* camera, AssetManag
 	for (auto i = 0u; i < m_mesh->numVerticesU(); ++i )
 		m_mesh->mutableVertex(i).c = FW::Vec3f(1,1,1);
 
-	RayTracer::get().startUp(m_launcher->getNumCores());
+	RayTracer::get().startUp();
 	m_sceneTree = RayTracer::get().constructHierarchy(m_triangles, m_indexListFromScene);
-		
+	std::cout << std::endl;
+	std::cout << "///////////////////////////////////////////" << std::endl;
+	std::cout << "Press 1 to cast photons and image synthesis" << std::endl;
+	std::cout << "Press 2 to toggle between rendering options" << std::endl;
+	std::cout << "///////////////////////////////////////////" << std::endl;
+	std::cout << std::endl;
 }
 
 void Renderer::shutDown()
@@ -122,7 +128,7 @@ void Renderer::updateTriangleToMeshDataPointers()
 		m_triangles[ i ].m_userPointer = &m_triangleToMeshData[i];
 }
 
-void Renderer::castDirectLight(const size_t numOfPhotons)
+void Renderer::castDirectLight(const size_t numOfPhotons, std::vector<Hit>& tmpHitList)
 {
 	std::vector<float> areas = std::vector<float> (m_lightSources.size());
 	float total = .0f;
@@ -136,113 +142,140 @@ void Renderer::castDirectLight(const size_t numOfPhotons)
 	FW::Random randomGen = FW::Random();
 	Node* buffer[1028];
 
+	float power = m_contextData.d_totalLight/(m_lightSources.size());
+	FW::Vec3f photonPower = FW::Vec3f(power)/numOfPhotons; 
+
 	for(auto i = 0u; i < m_lightSources.size(); ++i)
 	{
 		size_t s = numOfPhotons * areas[i]/total + 1u;
-		float power = m_scanlineContext.d_totalLight/(m_lightSources.size());
 		m_triangles[m_lightSources[i]].m_lightPower = power;
-		FW::Vec3f photonPower = FW::Vec3f(power)/numOfPhotons; 
+		const Triangle& tri = m_triangles[m_lightSources[i]];
+		FW::Vec3f A = *tri.m_vertices[0];
+		FW::Vec3f B = *tri.m_vertices[1];
+		FW::Vec3f C = *tri.m_vertices[2];
+
 		for(auto j = 0u; j < s; ++j)
-		{
-			const Triangle& tri = m_triangles[m_lightSources[i]];
-			FW::Vec3f A = *tri.m_vertices[0];
-			FW::Vec3f B = *tri.m_vertices[1];
-			FW::Vec3f C = *tri.m_vertices[2];
-		
+		{	
 			float sqr_r1 = FW::sqrt(randomGen.getF32(0,1.0f));
 			float r2 = randomGen.getF32(0,1.0f);
 			FW::Vec3f org = (1-sqr_r1)*A + sqr_r1*(1-r2)*B + sqr_r1*r2*C;
 			FW::Vec3f div = getDiversion(org,tri);
-			FW::Vec3f normal = (interpolateAttribute(tri, div, m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
-			normal = normal.normalized();
+			FW::Vec3f normalLightSource = (interpolateAttribute(tri, div, m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
+			normalLightSource = normalLightSource.normalized();
 
 			//drawTriangleToCamera(org, FW::Vec4f(pow, 1.f));
 			
-			FW::Vec3f dir = randomVectorToHalfUnitSphere(normal, m_randomGen);
+			FW::Vec3f dir = randomVectorToHalfUnitSphere(normalLightSource, m_randomGen);
 			Hit hit = Hit(10.f);
-			RayTracer::get().rayCast(org, dir, hit, m_triangles, m_indexListFromScene, m_sceneTree, buffer);
 			
-			if(!hit.b)
+			if(!RayTracer::get().rayCast(org, dir, hit, m_triangles, m_indexListFromScene, m_sceneTree, buffer))
 				continue;
 
 			FW::Vec3f newNormal = (interpolateAttribute(hit.triangle, getDiversion(hit.intersectionPoint,hit.triangle), m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
 			newNormal = newNormal.normalized();
-			FW::Vec3f pow = power * getAlbedo((TriangleToMeshData*)tri.m_userPointer, m_mesh, div) * FW::dot(newNormal, -dir);
-
-			const TriangleToMeshData* map = (const TriangleToMeshData*) hit.triangle.m_userPointer;
-			FW::Vec3f barysHit = FW::Vec3f((1.0f - hit.u - hit.v, hit.u, hit.v));
-			FW::Vec3f albedo = getAlbedo(map, m_mesh,barysHit);
+			FW::Vec3f albedoLightSource = getAlbedo((TriangleToMeshData*)tri.m_userPointer, m_mesh, div);
+			FW::Vec3f pow = photonPower * albedoLightSource * FW::dot(newNormal, -dir);
 
 			if(shader(hit, m_mesh) == MaterialPM_Lightsource)
 			{				
-				castIndirectLight(Photon(hit.intersectionPoint, pow, newNormal), hit, buffer);
+				castIndirectLight(Photon(hit.intersectionPoint, photonPower, FW::Vec3f()), hit, buffer, tmpHitList);
 				continue;
 			}
 			Photon photon = Photon(hit.intersectionPoint, pow, -(dir.normalized()));
 			m_photons.push_back(photon);
+			tmpHitList.push_back(hit);
+
+			const TriangleToMeshData* mapNew = (const TriangleToMeshData*) hit.triangle.m_userPointer;
+			FW::Vec3f barysNew = FW::Vec3f((1.0f - hit.u - hit.v, hit.u, hit.v));
+			FW::Vec3f albedoNew = getAlbedo(mapNew, m_mesh,albedoNew);
+
 			float r3 = randomGen.getF32(0,1.f);
-			float threshold = (albedo.x + albedo.y + albedo.z)/3.f;
+			float threshold = (albedoNew.x + albedoNew.y + albedoNew.z)/3.f;
 			if(r3 < threshold)
-				castIndirectLight(photon, hit, buffer);
+				castIndirectLight(photon, hit, buffer, tmpHitList);
 		}
 	}
 }
 
-void Renderer::castIndirectLight(const Photon& previous, const Hit& hit, Node** buffer)
+void Renderer::castIndirectLight(const Photon& previous, const Hit& previousHit, Node** buffer, std::vector<Hit>& tmpHitList)
 {
 	FW::Random randomGen = FW::Random(m_photons.size());
-	const Triangle& tri = hit.triangle;
-	const TriangleToMeshData* data = (TriangleToMeshData*) hit.triangle.m_userPointer;
-	FW::Vec3f normal = (interpolateAttribute(tri, getDiversion(hit.intersectionPoint,tri), m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
-	normal = normal.normalized();
+	const Triangle& tri = previousHit.triangle;
+	const TriangleToMeshData* data = (TriangleToMeshData*) previousHit.triangle.m_userPointer;
+	FW::Vec3f normalPrevious = (interpolateAttribute(tri, getDiversion(previousHit.intersectionPoint,tri), m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
+	normalPrevious = normalPrevious.normalized();
 
-	FW::Vec3f org = previous.pos + 0.001f * normal;
-	FW::Vec3f dir = randomVectorToHalfUnitSphere(normal, randomGen);
+	FW::Vec3f org = previous.pos + 0.001f * normalPrevious;
+	FW::Vec3f dir = randomVectorToHalfUnitSphere(normalPrevious, randomGen);
 
-	Hit h = Hit(10.f);
-	RayTracer::get().rayCast(org, dir, h, m_triangles, m_indexListFromScene, m_sceneTree, buffer);
-			
-	if(!h.b)
+	Hit newHit = Hit(10.f);
+	if(!RayTracer::get().rayCast(org, dir, newHit, m_triangles, m_indexListFromScene, m_sceneTree, buffer))
 		return;
 
-	const TriangleToMeshData* map = (const TriangleToMeshData*) hit.triangle.m_userPointer;
-	FW::Vec3f barys = FW::Vec3f((1.0f - h.u - h.v, h.u, h.v));
-	const FW::MeshBase::Material& mat = m_mesh->material(map->submeshIndex);
-	FW::Vec3f albedo = getAlbedo(map, m_mesh,barys);
+	const TriangleToMeshData* mapPrevious = (const TriangleToMeshData*) previousHit.triangle.m_userPointer;
+	FW::Vec3f barysPrevious = FW::Vec3f((1.0f - previousHit.u - previousHit.v, previousHit.u, previousHit.v));
+	FW::Vec3f albedoPrevious = getAlbedo(mapPrevious, m_mesh,barysPrevious);
 
-	FW::Vec3f newNormal = (interpolateAttribute(h.triangle, getDiversion(h.intersectionPoint,h.triangle), m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
+	FW::Vec3f newNormal = (interpolateAttribute(newHit.triangle, getDiversion(newHit.intersectionPoint,newHit.triangle), m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
 	newNormal = newNormal.normalized();
-	FW::Vec3f pow = previous.power * getAlbedo((TriangleToMeshData*)h.triangle.m_userPointer, m_mesh, getDiversion(h.intersectionPoint, h.triangle)) * FW::dot(newNormal, -dir);
+	FW::Vec3f pow = previous.power * albedoPrevious * FW::dot(newNormal, -dir);
 
-	Photon photon = Photon(h.intersectionPoint, pow, -(dir.normalized()));
+	Photon photon = Photon(newHit.intersectionPoint, pow, -(dir.normalized()));
 	m_photons.push_back(photon);
-	float threshold = (albedo.x + albedo.y + albedo.z)/3.f;
+	tmpHitList.push_back(newHit);
+
+	const TriangleToMeshData* mapNew = (const TriangleToMeshData*) newHit.triangle.m_userPointer;
+	FW::Vec3f barysNew = FW::Vec3f((1.0f - newHit.u - newHit.v, newHit.u, newHit.v));
+	FW::Vec3f albedoNew = getAlbedo(mapNew, m_mesh,barysNew);
+
+	float threshold = (albedoNew.x + albedoNew.y + albedoNew.z)/3.f;
 	float r3 = randomGen.getF32(0,1.0f);
 	if(r3 < threshold)
-		castIndirectLight(photon, h, buffer);
+		castIndirectLight(photon, newHit, buffer, tmpHitList);
 }
 
-void Renderer::initPhotonMaping(const size_t numOfPhotons, const float r, const size_t FG, const float totalLight, const FW::Vec2i& size)
+void Renderer::initPhotonMaping(const size_t numOfPhotons, const float r, const size_t FG, const float totalLight, const size_t numberOfSamplesByDimension,const FW::Vec2i& size)
 {
-	m_scanlineContext.d_numberOfFGRays=  FG;
-	m_scanlineContext.d_FGRadius=  r;
-	m_scanlineContext.d_totalLight=  totalLight;
-	std::cout << "Starting photon cast..."; 
+	std::cout << "Welcome to the most EPIC PhotonMapingEexperience! Have a nice ride <-(0_o)/~" << std::endl;
+	std::cout << "Initiliaze photon maping: " << std::endl;
+	std::cout << "Radius - " << r << " / FG rays - " << FG << " / totalLight - " << totalLight << std::endl;
+	std::cout << std::endl;
+
+	FW::Timer timerTotal;
+	timerTotal.start();
+	updateContext(r, FG, totalLight, numberOfSamplesByDimension);
+	
 	m_photons.clear();
 	m_photonIndexList.clear();
 	m_photonTestMesh->clear();
 	m_photonTestMesh->addSubmesh();
+	
 	if(m_photonCasted)
 		RayTracer::get().demolishTree(m_photonTree);
-	castDirectLight(numOfPhotons);
+	
+	std::cout << "Starting photon cast...";
+	std::vector<Hit> tmpHitList;
+	tmpHitList.reserve(numOfPhotons);
+	updatePhotonListCapasity(numOfPhotons);
+	castDirectLight(numOfPhotons, tmpHitList);
 	m_photonCasted = true;
-	std::cout << "Photon cast done... " << m_photons.size() << " photons total" << std::endl;
+	
+	std::cout << " done! " << m_photons.size() << " photons total!" << std::endl;
 	m_photonTree = RayTracer::get().constructHierarchy(m_photons, m_photonIndexList);
-	std::cout << "Creating image... " << std::endl;
+
 	FW::Timer timer;
 	timer.start();
-	createImage(size);
+	std::cout << "Precalculate outgoinging light for each photon... " << std::endl;
+	preCalculateOutgoingLight(tmpHitList);
 	std::cout << " done!  Time spend: " << timer.getElapsed() << std::endl;
+
+	std::cout << "Start image synthesis, image size as pixels: " << size.x << "/" << size.y << "..." << std::endl;
+	timer.start();
+	synthesisImage(size);
+	std::cout << " done!  Time spend: " << timer.getElapsed() << std::endl;
+	std::cout << "Everything done... Time spend: " << timerTotal.getElapsed() << std::endl;
+	std::cout << "___________________________________________________________________" << std::endl;
+	std::cout << std::endl;
 	m_renderWithPhotonMaping = true;
 }
 
@@ -312,7 +345,7 @@ FW::Vec3f Renderer::getDiversion(const FW::Vec3f& p, const Triangle& tri)
 	return FW::Vec3f(A/total, B/total, C/total);
 }
 
-void Renderer::createImage(const FW::Vec2i& size)
+void Renderer::synthesisImage(const FW::Vec2i& size)
 {
 	if(m_renderWithPhotonMaping)
 		delete m_image;
@@ -324,21 +357,12 @@ void Renderer::createImage(const FW::Vec2i& size)
 	FW::Mat4f projection = FW::Mat4f::fitToView(FW::Vec2f(-1,-1), FW::Vec2f(2,2), imageSize)*m_camera->getCameraToClip();
 	FW::Mat4f invP = (projection * worldToCamera).inverted();
 	
-	m_scanlineContext.d_invP = invP;
-	m_scanlineContext.d_vertices = &m_vertices;
-	m_scanlineContext.d_triangles = &m_triangles;
-	m_scanlineContext.d_triangleToMeshData = &m_triangleToMeshData;
-	m_scanlineContext.d_indexListFromScene = &m_indexListFromScene;
-	m_scanlineContext.d_photons = &m_photons;
-	m_scanlineContext.d_photonIndexList = &m_photonIndexList;
-	m_scanlineContext.d_image = m_image;
-	m_scanlineContext.d_mesh = m_mesh;
-	m_scanlineContext.d_sceneTree = m_sceneTree;
-	m_scanlineContext.d_photonTree = m_photonTree;	
+	m_contextData.d_invP = invP;
+	m_contextData.d_image = m_image;	
 
 	//m_launcher->setNumThreads(1);
 	m_launcher->popAll();
-	m_launcher->push(imageScanline, &m_scanlineContext, 0, imageSize.y );
+	m_launcher->push(imageScanline, &m_contextData, 0, imageSize.y );
 	while(m_launcher->getNumFinished() != m_launcher->getNumTasks())
 	{
 		printf("~ %.2f %% \r", 100.0f*m_launcher->getNumFinished()/(float)m_launcher->getNumTasks());
@@ -347,7 +371,7 @@ void Renderer::createImage(const FW::Vec2i& size)
 
 void Renderer::imageScanline(FW::MulticoreLauncher::Task& t)
 {
-	scanlineData& data = *(scanlineData*)t.data;
+	contextData& data = *(contextData*)t.data;
 
 	const int y = t.idx;	
 	const FW::Vec2f imageSize = data.d_image->getSize();
@@ -359,7 +383,7 @@ void Renderer::imageScanline(FW::MulticoreLauncher::Task& t)
 		const float xP = (x + .5f) / imageSize.x *  2.0f - 1.0f;
 		FW::Vec3f E = FW::Vec3f();
 		float totalW = .0f;
-		MultiJitteredSamplingWithBoxFilter sampling = MultiJitteredSamplingWithBoxFilter(1, FW::Vec2f(xP, yP), imageSize);
+		MultiJitteredSamplingWithBoxFilter sampling = MultiJitteredSamplingWithBoxFilter(data.d_numberOfSamplesByDimension, FW::Vec2f(xP, yP), imageSize);
 		while(!sampling.isDone())
 		{
 			float w = .0f;
@@ -377,6 +401,7 @@ void Renderer::imageScanline(FW::MulticoreLauncher::Task& t)
 			{
 				FW::Vec3f albedo = getAlbedo((TriangleToMeshData*) h.triangle.m_userPointer, data.d_mesh, FW::Vec3f(1.f-h.u-h.v, h.u, h.v));				
 				FW::Vec3f dir = (-Rd).normalized();
+				FW::Vec3f tmp;
 				if(shader(h, data.d_mesh) == MaterialPM_Lightsource)
 				{
 					Triangle& tri = h.triangle;
@@ -386,11 +411,11 @@ void Renderer::imageScanline(FW::MulticoreLauncher::Task& t)
 					if(dot < 0)
 						dot = FW::dot(dir, -normal);
 				
-					E = ((*data.d_triangles)[h.i]).m_lightPower * albedo * dot; 
+					E += ((*data.d_triangles)[h.i]).m_lightPower * albedo * dot; 
 				}
 				else
 				{
-					E = albedo * gatherPhotons(h,dir,data, buffer);
+					E += albedo * finalGathering(h,dir,data, buffer);
 				}
 				E *= w;
 				totalW += w;
@@ -444,53 +469,37 @@ FW::Vec3f Renderer::getAlbedo(const TriangleToMeshData* map, const MeshC* mesh, 
 	return Kd;
 }
 
-FW::Vec3f Renderer::gatherPhotons(const Hit& h, const FW::Vec3f& dir, const scanlineData& data, Node** buffer)
+FW::Vec3f Renderer::finalGathering(const Hit& h, const FW::Vec3f& dir, const contextData& data, Node** buffer)
 {
-	const Triangle& tri = h.triangle;
-	const TriangleToMeshData* meshData = (TriangleToMeshData*) h.triangle.m_userPointer;
-	FW::Vec3f normal = (interpolateAttribute(tri, getDiversion(h.intersectionPoint,tri), data.d_mesh, data.d_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
-	normal = normal.normalized();
-	FW::Vec3f org = h.intersectionPoint + 0.001f * normal;
-	FW::Vec3f total;
-	FW::Random random = FW::Random();
 	if(data.d_numberOfFGRays == 1)
 	{
-		std::vector<HeapNode> nodes;
 		float r = data.d_FGRadius;
-		RayTracer::get().searchPhotons(h.intersectionPoint, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, 10u, nodes, buffer);
-		FW::Vec3f E = FW::Vec3f();
-		for(auto j = 1u; j < nodes.size(); ++j)
-		{
-			float dot = FW::dot(dir, (*data.d_photons)[nodes[j].key].dir);
-			if(dot < .0f)
-				continue;
-			E += (*data.d_photons)[nodes[j].key].power * dot;
-		}
-		return E/(2*r*FW_PI);
+		int index = RayTracer::get().findNearestPhoton(h.intersectionPoint, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, buffer);
+		if(index == -1)
+			return FW::Vec3f();
+		else
+			return (*data.d_photons)[index].E;
 	}
 	else
 	{
+		FW::Vec3f normal = (interpolateAttribute(h.triangle, getDiversion(h.intersectionPoint,h.triangle), data.d_mesh, data.d_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
+		normal = normal.normalized();
+		FW::Vec3f org = h.intersectionPoint + 0.001f * normal;
+		FW::Vec3f total = FW::Vec3f();
+		FW::Random random = FW::Random();
 		for(auto i = 0u; i < data.d_numberOfFGRays; ++i)
-		{			
+		{	
 			FW::Vec3f dir = randomVectorToHalfUnitSphere(normal, random);
-
 			Hit hit = Hit(10.f);
 			if(!RayTracer::get().rayCast(org, dir, hit, *data.d_triangles, *data.d_indexListFromScene, data.d_sceneTree, buffer))
 				continue;
-			std::vector<HeapNode> nodes;
 			float r = data.d_FGRadius;
-			RayTracer::get().searchPhotons(hit.intersectionPoint, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, 10u, nodes, buffer);
-			FW::Vec3f E = FW::Vec3f();
-			for(auto j = 1u; j < nodes.size(); ++j)
-			{
-				float dot = FW::dot(-dir, (*data.d_photons)[nodes[j].key].dir);
-				if(dot < .0f)
-					continue;
-				E += (*data.d_photons)[nodes[j].key].power * dot;
-			}
-			total += E/(2*r*FW_PI);
+			int index = RayTracer::get().findNearestPhoton(hit.intersectionPoint, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, buffer);
+			if(index == -1)
+				continue;
+			total += (*data.d_photons)[index].E;
 		}
-		total *= 1.f/(float) data.d_numberOfFGRays; 
+		total *= 1.f/(float) data.d_numberOfFGRays;
 		return total;
 	}
 };
@@ -514,38 +523,97 @@ FW::Vec3f Renderer::randomVectorToHalfUnitSphere(const FW::Vec3f& vec, FW::Rando
 		return formBasisMat*rndToUnitHalfSphere;	
 }
 
-void Renderer::preCalculateOutgoingLight()
+void Renderer::preCalculateOutgoingLight(std::vector<Hit>& tmpHitList)
 {
-	for ( size_t i = 0u; i < m_photons.size(); ++i )
+	m_contextData.d_tmpHitList = &tmpHitList;
+	m_contextData.d_photonTree = m_photonTree;
+	
+	m_launcher->popAll();
+	m_launcher->setNumThreads(m_launcher->getNumCores());
+	//m_launcher->setNumThreads(1);
+	m_launcher->push(outgoingLightFunc, &m_contextData, 0, 64);
+	while(m_launcher->getNumFinished() != m_launcher->getNumTasks())
 	{
-		gatherPhotons(
-		if (photonsFound == 0)
+		printf("~ %.2f %% \r", 100.0f*m_launcher->getNumFinished()/(float)m_launcher->getNumTasks());
+	}
+}
+
+void Renderer::outgoingLightFunc(FW::MulticoreLauncher::Task& t)
+{
+	contextData& data = *(contextData*)t.data;	
+	int thread = t.idx;
+	int index = thread;
+	Node* buffer[1028]; 
+	while(index < (*data.d_photons).size())
+	{
+		Photon& photon = (*data.d_photons)[index];
+		Hit& h = (*data.d_tmpHitList)[index];
+		std::vector<HeapNode> nodes;
+		float r = data.d_FGRadius;
+		RayTracer::get().searchPhotons(h.intersectionPoint, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, 10u, nodes, buffer);
+
+		if(nodes.empty())
+		{
+			index += 64;
 			continue;
-
-		RTMaterial* material = m_tempMaterials[i];
-		Vec3f normal = m_tempNormals[i];
-		RTHit hit = m_tempHits[i];
-		const RTToMesh* map = (const RTToMesh*)hit.triangle->m_userPointer;
-
-		float alpha = 10.818f;
-		float beta = 1.953f;
-		float e = 2.718281f;
-		float rMax = sqrt(knnPhotons[1].dst);
-
-		Vec3f Li = Vec3f();
-		for ( int j = 1; j <= photonsFound; ++j )
-		{		
-			Vec3f lightDir = knnPhotons[j].photon->dir;
-			if ( normal.dot( lightDir ) > 0 )
-			{
-				float d = sqrt(knnPhotons[j].dst);
-				float t1 = 1.0f - pow( e, ( -beta * d * d / ( 2.0f * rMax * rMax) ) );
-				float t2 = 1.0f - pow( e, -beta );
-				float w = alpha * ( 1.0f - (t1 / t2) );
-				Li += material->shade( normal, lightDir, normal, knnPhotons[j].photon->E, map, hit.barys ) * w;
-			}
 		}
-		float A = FW_PI*rMax*rMax;
-		radianceMap->m_photonMap[i].E = Li / A * FW_PI;
+
+		const Triangle& tri = h.triangle;
+		FW::Vec3f normal = (interpolateAttribute(tri, getDiversion(h.intersectionPoint,tri), data.d_mesh, data.d_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
+		normal = normal.normalized();
+
+		const float alpha = 10.818f;
+		const float beta = 1.953f;
+		const float e = 2.718281f;
+
+		FW::Vec3f Li = FW::Vec3f();
+		for ( int j = 1; j < nodes.size(); ++j )
+		{		
+			FW::Vec3f lightDir = (*data.d_photons)[nodes[j].value].dir;
+			float dot = FW::dot(lightDir, normal);
+			if(dot < .0f)
+				continue;
+			float d = nodes[j].key;
+			float t1 = 1.0f - pow( e, ( -beta * d * d / ( 2.0f * r * r) ) );
+			float t2 = 1.0f - pow( e, -beta );
+			float w = alpha * ( 1.0f - (t1 / t2) );
+			const Hit& photonHit = (*data.d_tmpHitList)[nodes[j].value];
+			TriangleToMeshData* map = (TriangleToMeshData*) photonHit.triangle.m_userPointer;
+			FW::Vec3f barys = FW::Vec3f((1.0f - photonHit.u - photonHit.v, photonHit.u, photonHit.v));
+			Li +=  w * (*data.d_photons)[nodes[j].value].power * dot * getAlbedo(map, data.d_mesh, barys);
+		}
+		float A = FW_PI*r*r;
+		photon.E = Li / A;
+		index += 64;
+	}
+}
+
+void Renderer::updateContext(const float r, const size_t FG, const float totalLight, const size_t numberOfSamplesByDimension)
+{
+	/*
+	Doesn't update image pointer, hitList for outgoing light, invP camera matrix or root to photon hierarchy tree!!!!
+	*/
+	m_contextData.d_numberOfFGRays=  FG;
+	m_contextData.d_numberOfSamplesByDimension = numberOfSamplesByDimension;
+	m_contextData.d_FGRadius=  r;
+	m_contextData.d_totalLight=  totalLight;
+	m_contextData.d_vertices = &m_vertices;
+	m_contextData.d_triangles = &m_triangles;
+	m_contextData.d_triangleToMeshData = &m_triangleToMeshData;
+	m_contextData.d_indexListFromScene = &m_indexListFromScene;
+	m_contextData.d_photons = &m_photons;
+	m_contextData.d_photonIndexList = &m_photonIndexList;
+	m_contextData.d_mesh = m_mesh;
+	m_contextData.d_sceneTree = m_sceneTree;
+}
+
+void Renderer::updatePhotonListCapasity(const size_t numberOfPhotons)
+{
+	size_t c = m_photons.capacity();
+	if(c < numberOfPhotons)
+	{
+		size_t s = numberOfPhotons - c;
+		m_photonIndexList.reserve(s);
+		m_photons.reserve(s);
 	}
 }

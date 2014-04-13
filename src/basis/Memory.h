@@ -105,8 +105,8 @@ private:
 
 struct HeapNode
 {
-	float value;
-	size_t key;
+	float key;
+	size_t value;
 };
 
 class MaxHeap
@@ -115,19 +115,17 @@ public:
 						MaxHeap				(size_t size, std::vector<HeapNode>*);
 						~MaxHeap			(void);
 	
-	size_t			getMaxKey();
-	float			getMaxValue();
-	size_t			popHeap();
-	void			pushHeap(size_t, float);
+	float			getMaxKey();
+	size_t			getMaxValue();
+	bool			pushHeap(size_t, float);
 	bool			heapIsFull();
-	size_t			getIndex(size_t i)	const	{ return (*m_array)[i].key;}
-	float			getValue(size_t i)	const	{ return (*m_array)[i].value;}
-	size_t			membersInHeap()	const 	{ return m_heapCounter;} 
+	float			getIndex(size_t i)	const	{ return (*m_array)[i].key;}
+	size_t			getValue(size_t i)	const	{ return (*m_array)[i].value;}
 
 private:
 	std::vector<HeapNode>* m_array;
 	size_t				m_size;
-	size_t				m_heapCounter;
+	size_t				m_nextIndex;
 
 	size_t				getParent(size_t i)		{ return i/2; } ;
 	size_t				getRightChild(size_t i)	{ return 2*i+1; };

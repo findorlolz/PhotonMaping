@@ -65,22 +65,21 @@ public:
 struct Hit
 {
 	Hit(float tMax) : 
-	i(0u), t(tMax), u(0.0f), v(0.0f), b(false) {}
+	i(-1), t(tMax), u(0.0f), v(0.0f) {}
 
 	FW::Vec3f intersectionPoint;
 	Triangle triangle;
-	size_t i;
+	int i;
 	float t;
 	float u;
 	float v;
-	bool b;
 };
 
 struct Photon
 {
 	Photon() {}
 	Photon(FW::Vec3f& p, FW::Vec3f& pow, FW::Vec3f& d) :
-		pos(p), power(pow), dir(d) {}
+		pos(p), power(pow), dir(d), E(FW::Vec3f()) {}
 
 	FW::Vec3f pos;
 	FW::Vec3f power;

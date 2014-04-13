@@ -17,6 +17,10 @@ enum MaterialPM
 	MaterialPM_Diffuse
 };
 
+enum RenderingState
+{
+
+};
 
 
 class Renderer
@@ -38,7 +42,7 @@ public:
         void shutDown();
 
 		void drawFrame();
-		void initPhotonMaping(const size_t, const float, const size_t, const float, const FW::Vec2i&);
+		void initPhotonMaping(const size_t, const float, const size_t, const float, const size_t, const FW::Vec2i&);
 		void clearTriangles();
 		void toggleRenderingMode() { m_renderWithPhotonMaping = !m_renderWithPhotonMaping; }
 
@@ -47,9 +51,10 @@ private:
 		 Renderer() {}
         ~Renderer() {}
 
-		void castIndirectLight(const Photon&, const Hit& hit, Node**);
-		void castDirectLight(const size_t);
-		void preCalculateOutgoingLight();
+		void castIndirectLight(const Photon&, const Hit& hit, Node**, std::vector<Hit>&);
+		void castDirectLight(const size_t, std::vector<Hit>&);
+		void preCalculateOutgoingLight(std::vector<Hit>&);
+		static void outgoingLightFunc(FW::MulticoreLauncher::Task&);
 
 		void initTrianglesFromMesh(MeshType, const FW::Vec3f&);
 		void updateTriangleToMeshDataPointers();
@@ -57,13 +62,17 @@ private:
 		void drawTriangleToCamera(const FW::Vec3f& pos, const FW::Vec4f& color);
 		void drawPhotonMap();
 
-		void createImage(const FW::Vec2i& size);
-		static void imageScanline(FW::MulticoreLauncher::Task& t);
+		void updateContext(const float, const size_t, const float, const size_t);
+		void updatePhotonListCapasity(const size_t);
 
-		struct scanlineData
+		void synthesisImage(const FW::Vec2i& size);
+		static void imageScanline(FW::MulticoreLauncher::Task&);
+
+		struct contextData
 		{
 			FW::Mat4f d_invP;
 			size_t d_numberOfFGRays;
+			size_t d_numberOfSamplesByDimension;
 			float d_FGRadius;
 			float d_totalLight;
 			std::vector<FW::Vec3f>* d_vertices;
@@ -72,6 +81,7 @@ private:
 			std::vector<size_t>* d_indexListFromScene;
 			std::vector<Photon>* d_photons;
 			std::vector<size_t>* d_photonIndexList;
+			std::vector<Hit>* d_tmpHitList;
 			FW::Image* d_image;
 			MeshC* d_mesh;
 			Node* d_sceneTree;
@@ -83,7 +93,7 @@ private:
 		static FW::Vec3f getAlbedo(const TriangleToMeshData*, const MeshC*, const FW::Vec3f&);
 		static FW::Vec3f randomVectorToHalfUnitSphere(const FW::Vec3f&, FW::Random&);
 		
-		static FW::Vec3f gatherPhotons(const Hit&, const FW::Vec3f&, const scanlineData&, Node**);
+		static FW::Vec3f finalGathering(const Hit&, const FW::Vec3f&, const contextData&, Node**);
 
 		static MaterialPM shader(const Hit&, MeshC*);
 
@@ -102,7 +112,7 @@ private:
 		FW::Mat4f m_meshScale;
 
 		FW::MulticoreLauncher* m_launcher;
-		scanlineData m_scanlineContext;
+		contextData m_contextData;
 
 		MeshC* m_mesh;
 		FW::Mesh<FW::VertexPNC>* m_photonTestMesh;

@@ -37,7 +37,7 @@ public:
 
         FW::MeshBase* getMesh(MeshType meshType);
 		FW::Image* getImage(ImageType type);
-		void exportMesh(const const std::string& fileName, FW::MeshBase*);
+		void exportMesh(const std::string& fileName, FW::MeshBase*);
 
 private:
         FW::MeshBase* importMesh(const std::string& fileName);

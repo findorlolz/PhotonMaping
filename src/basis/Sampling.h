@@ -26,10 +26,10 @@ protected:
 	size_t m_counter;
 };
 
-class MultiJitteredSamplingWithBoxFilter : public Sampling
+class MultiJitteredSamplingWithTentFilter : public Sampling
 {
 public:
-	MultiJitteredSamplingWithBoxFilter(size_t samplesPerDimension, const FW::Vec2f& middle, const FW::Vec2f& s) :
+	MultiJitteredSamplingWithTentFilter(size_t samplesPerDimension, const FW::Vec2f& middle, const FW::Vec2f& s) :
 	Sampling(samplesPerDimension, middle)
 	{
 		m_random = FW::Random();
