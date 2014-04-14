@@ -14,14 +14,10 @@ class Sampling;
 enum MaterialPM
 {
 	MaterialPM_Lightsource,
-	MaterialPM_Diffuse
+	MaterialPM_Diffuse,
+	MaterialPM_Mirror,
+	MaterialPM_None
 };
-
-enum RenderingState
-{
-
-};
-
 
 class Renderer
 {
@@ -43,8 +39,19 @@ public:
 
 		void drawFrame();
 		void initPhotonMaping(const size_t, const float, const size_t, const float, const size_t, const FW::Vec2i&);
+		void initImageSynthesisFromExistingPM(const float, const size_t, const float, const size_t, const FW::Vec2i&);
 		void clearTriangles();
-		void toggleRenderingMode() { m_renderWithPhotonMaping = !m_renderWithPhotonMaping; }
+		void toggleRenderingMode() 
+		{ 
+			if(!m_hasPhotonMap)
+			{
+				std::cout << "No image synthesis done yet, just basic rendering available!" << std::endl;
+				std::cout << "Press 1 for photong casting and image synthesis" << std::endl;
+				std::cout << "___________________________________________________________________" << std::endl;
+				return;
+			}
+			m_renderWithPhotonMaping = !m_renderWithPhotonMaping; 
+		}
 
 private:
 
@@ -92,6 +99,7 @@ private:
 		static FW::Vec3f getDiversion(const FW::Vec3f&, const Triangle&);
 		static FW::Vec3f getAlbedo(const TriangleToMeshData*, const MeshC*, const FW::Vec3f&);
 		static FW::Vec3f randomVectorToHalfUnitSphere(const FW::Vec3f&, FW::Random&);
+		static MaterialPM traceRay(const FW::Vec3f&, const FW::Vec3f&, Hit&, const std::vector<Triangle>&, const std::vector<size_t>&, Node*, Node**, MeshC*);
 		
 		static FW::Vec3f finalGathering(const Hit&, const FW::Vec3f&, const contextData&, Node**);
 
@@ -126,5 +134,5 @@ private:
 		Node* m_sceneTree;
 		Node* m_photonTree;
 		bool m_renderWithPhotonMaping;
-		bool m_photonCasted;
+		bool m_hasPhotonMap;
 };

@@ -81,18 +81,24 @@ public:
     {
         Vec4f           diffuse;
         Vec3f           specular;
+		Vec3f			emissive;
         F32             glossiness;
         F32             displacementCoef; // height = texture/255 * coef + bias
         F32             displacementBias;
+		F32				opticalDensity;
+		S32				illuminationModel;
         Texture         textures[TextureType_Max];
 
         Material(void)
         {
             diffuse             = Vec4f(0.75f, 0.75f, 0.75f, 1.0f);
+			emissive			= Vec3f();
             specular            = 0.5f;
             glossiness          = 32.0f;
             displacementCoef    = 1.0f;
+			opticalDensity		= 1.0f;
             displacementBias    = 0.0f;
+			illuminationModel	= 0u;
         }
     };
 

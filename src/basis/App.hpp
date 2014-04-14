@@ -18,9 +18,11 @@ private:
     {
         Action_None,
 		Action_StartPM,
+		Action_newImage,
 		Action_ShowPMResult,
 		Action_ChangeCameraState,
-		Action_EnableCamera
+		Action_EnableCamera,
+		Action_ControlToggle
     };
 
 public:
@@ -49,6 +51,7 @@ private:
 	AssetManager* m_assetManager;
 
 	bool m_visibleCameraControls;
+	bool m_visiblPMControls;
 	bool m_stateChange;
 };
 

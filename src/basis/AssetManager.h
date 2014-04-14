@@ -10,11 +10,11 @@
 enum MeshType
 {
         MeshType_Pyramid,
-		MeshType_Sphere,
 		MeshType_Cube,
 		MeshType_TestScene,
-		MeshType_Cornell,
+		MeshType_CornellBasic,
 		MeshType_Pheonix,
+		MeshType_CornellSphere,
 
         MeshType_Count
 };

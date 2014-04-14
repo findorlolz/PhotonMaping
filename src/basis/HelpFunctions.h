@@ -17,8 +17,8 @@ enum Axis
 
 struct Triangle
 {
-	float		m_lightPower;
 	FW::Vec3f*	m_vertices[3];
+	FW::Vec3f*	m_lightPower;	
 	void*	    m_userPointer;
 };
 

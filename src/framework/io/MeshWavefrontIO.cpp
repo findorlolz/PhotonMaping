@@ -249,6 +249,11 @@ void FW::loadMtl(ImportState& s, BufferedInputStream& mtlIn, const String& dirNa
             else if (parseFloats(ptr, mat->specular.getPtr(), 3) && parseSpace(ptr) && !*ptr)
                 valid = true;
         }
+        else if (parseLiteral(ptr, "Ke ") && parseSpace(ptr)) // specular color
+        {
+			if(parseFloats(ptr, mat->emissive.getPtr(), 3) && parseSpace(ptr) && !*ptr)
+                valid = true;
+        }
         else if (parseLiteral(ptr, "d ") && parseSpace(ptr)) // alpha
         {
             if (parseFloat(ptr, mat->diffuse.w) && parseSpace(ptr) && !*ptr)
@@ -263,6 +268,16 @@ void FW::loadMtl(ImportState& s, BufferedInputStream& mtlIn, const String& dirNa
                 mat->glossiness = 1.0f;
                 mat->specular.setZero();
             }
+        }
+        else if (parseLiteral(ptr, "Ni ") && parseSpace(ptr)) // optical density
+        {
+			if (parseFloat(ptr, mat->opticalDensity) && parseSpace(ptr) && !*ptr)
+                valid = true;
+        }
+		else if (parseLiteral(ptr, "illum ") && parseSpace(ptr)) // optical density
+        {
+			if (parseInt(ptr, mat->illuminationModel) && parseSpace(ptr) && !*ptr)
+                valid = true;
         }
         else if (parseLiteral(ptr, "map_Kd ")) // diffuse texture
         {
@@ -299,10 +314,8 @@ void FW::loadMtl(ImportState& s, BufferedInputStream& mtlIn, const String& dirNa
         else if (
             parseLiteral(ptr, "vp ") ||             // parameter space vertex
             parseLiteral(ptr, "Kf ") ||             // transmission color
-            parseLiteral(ptr, "illum ") ||          // illumination model
             parseLiteral(ptr, "d -halo ") ||        // orientation-dependent alpha
             parseLiteral(ptr, "sharpness ") ||      // reflection sharpness
-            parseLiteral(ptr, "Ni ") ||             // index of refraction
             parseLiteral(ptr, "map_Ks ") ||         // specular texture
             parseLiteral(ptr, "map_kS ") ||         // ???
             parseLiteral(ptr, "map_kA ") ||         // ???

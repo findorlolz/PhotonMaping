@@ -32,7 +32,7 @@ public:
 
 	bool		rayCast(const FW::Vec3f&, const FW::Vec3f&, Hit&, const std::vector<Triangle>&, const std::vector<size_t>&, Node*, Node**);
 	void		searchPhotons(const FW::Vec3f&, const std::vector<Photon>&, const std::vector<size_t>&, Node*, float&, const size_t, std::vector<HeapNode>&, Node**);
-	int		findNearestPhoton(const FW::Vec3f&, const std::vector<Photon>&, const std::vector<size_t>&, Node*, float&, Node**);
+	int			findNearestPhoton(const FW::Vec3f&, const std::vector<Photon>&, const std::vector<size_t>&, Node*, float&, Node**);
 
 private:
 	void		constructTree(size_t, size_t, Node*, Node*, std::vector<size_t>&);
