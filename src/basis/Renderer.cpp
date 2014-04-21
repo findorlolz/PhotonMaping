@@ -25,8 +25,10 @@ void Renderer::startUp(FW::GLContext* gl, FW::CameraControls* camera, AssetManag
 	m_hasPhotonMap = false;
 
 	m_mesh = new MeshC();
-	m_mesh->append(*(m_assetManager->getMesh(MeshType_CornellSphere)));
-	//m_mesh->append(*(m_assetManager->getMesh(MeshType_Cube)));
+	m_mesh->append(*(m_assetManager->getMesh(MeshType_CornellTest)));
+
+	m_mesh->collapseVertices();
+
 	m_photonTestMesh = new FW::Mesh<FW::VertexPNC>();
 	m_photonTestMesh->addSubmesh();
 	updateTriangleToMeshDataPointers();
@@ -100,7 +102,8 @@ void Renderer::updateTriangleToMeshDataPointers()
 		FW::Vec3f p = m_mesh->getVertexAttrib(i, FW::MeshBase::AttribType_Position).getXYZ();
 		m_vertices.push_back(p);
 	}
-	
+
+	FW::Vec3f lightPosApp = FW::Vec3f();
 	for (size_t i = 0u; i < m_mesh->numSubmeshes(); ++i )
 	{
 		const FW::Array<FW::Vec3i>& idx = m_mesh->indices(i);
@@ -119,20 +122,22 @@ void Renderer::updateTriangleToMeshDataPointers()
 			t.m_vertices[2] = &m_vertices[0] + idx[j][2];
 			if(mat->emissive != FW::Vec3f())
 			{
-				FW::Vec3f tmp = mat->emissive;
 				t.m_lightPower = &(mat->emissive);
-				tmp = *(t.m_lightPower);
 				m_lightSources.push_back(m_triangles.size());
+				lightPosApp += (*(t.m_vertices[0])+*(t.m_vertices[1])+*(t.m_vertices[2]))/3.f;
 			}
 			m_triangles.push_back(t);
 		}
-	}	
-	
+	}
+
+	lightPosApp *= 1.f/(float)m_lightSources.size();
+	m_contextData.d_lightPosEstimate = lightPosApp;
+
 	for ( size_t i = 0; i < m_triangles.size(); ++i )
 		m_triangles[ i ].m_userPointer = &m_triangleToMeshData[i];
 }
 
-void Renderer::castDirectLight(const size_t numOfPhotons, std::vector<Hit>& tmpHitList)
+void Renderer::castPhotons(const size_t numOfPhotons, std::vector<Hit>& tmpHitList)
 {
 	std::vector<float> areas = std::vector<float> (m_lightSources.size());
 	float total = .0f;
@@ -146,7 +151,6 @@ void Renderer::castDirectLight(const size_t numOfPhotons, std::vector<Hit>& tmpH
 	FW::Random randomGen = FW::Random();
 	Node* buffer[1028];
 
-	float power = m_contextData.d_totalLight/(m_lightSources.size());
 	FW::Vec3f photonPower = FW::Vec3f(m_contextData.d_totalLight)/numOfPhotons; 
 
 	for(auto i = 0u; i < m_lightSources.size(); ++i)
@@ -162,80 +166,110 @@ void Renderer::castDirectLight(const size_t numOfPhotons, std::vector<Hit>& tmpH
 		{	
 			float sqr_r1 = FW::sqrt(randomGen.getF32(0,1.0f));
 			float r2 = randomGen.getF32(0,1.0f);
-			FW::Vec3f org = (1-sqr_r1)*A + sqr_r1*(1-r2)*B + sqr_r1*r2*C;
-			FW::Vec3f div = getDiversion(org,tri);
-			FW::Vec3f normalLightSource = (interpolateAttribute(tri, div, m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
+			FW::Vec3f orig = (1-sqr_r1)*A + sqr_r1*(1-r2)*B + sqr_r1*r2*C;
+			FW::Vec3f normalLightSource = (interpolateAttribute(tri, orig, m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal)));
 			normalLightSource = normalLightSource.normalized();
-
-			//drawTriangleToCamera(org, FW::Vec4f(pow, 1.f));
+			FW::Vec3f albedoLightSource = getAlbedo((TriangleToMeshData*)tri.m_userPointer, m_mesh,getBarys(tri, orig, m_mesh)); 
 			
 			FW::Vec3f dir = randomVectorToHalfUnitSphere(normalLightSource, m_randomGen);
-			Hit hit = Hit(10.f);
-			
-			if(!RayTracer::get().rayCast(org, dir, hit, m_triangles, m_indexListFromScene, m_sceneTree, buffer))
-				continue;
+			FW::Vec3f E = lightSourcePower * photonPower * albedoLightSource;
 
-			FW::Vec3f newNormal = (interpolateAttribute(hit.triangle, getDiversion(hit.intersectionPoint,hit.triangle), m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
-			newNormal = newNormal.normalized();
-			FW::Vec3f albedoLightSource = getAlbedo((TriangleToMeshData*)tri.m_userPointer, m_mesh, div);
-			FW::Vec3f pow = lightSourcePower * photonPower * albedoLightSource * FW::dot(newNormal, -dir);
-
-			if(shader(hit, m_mesh) == MaterialPM_Lightsource)
-			{				
-				castIndirectLight(Photon(hit.intersectionPoint, photonPower, FW::Vec3f()), hit, buffer, tmpHitList);
-				continue;
-			}
-			Photon photon = Photon(hit.intersectionPoint, pow, -(dir.normalized()));
-			m_photons.push_back(photon);
-			tmpHitList.push_back(hit);
-
-			const TriangleToMeshData* mapNew = (const TriangleToMeshData*) hit.triangle.m_userPointer;
-			FW::Vec3f barysNew = FW::Vec3f((1.0f - hit.u - hit.v, hit.u, hit.v));
-			FW::Vec3f albedoNew = getAlbedo(mapNew, m_mesh,albedoNew);
-
-			float r3 = randomGen.getF32(0,1.f);
-			float threshold = (albedoNew.x + albedoNew.y + albedoNew.z)/3.f;
-			if(r3 < threshold)
-				castIndirectLight(photon, hit, buffer, tmpHitList);
+			tracePhoton(orig, dir, E, 0u, buffer, tmpHitList);
 		}
 	}
 }
 
-void Renderer::castIndirectLight(const Photon& previous, const Hit& previousHit, Node** buffer, std::vector<Hit>& tmpHitList)
+void Renderer::tracePhoton(const FW::Vec3f& orig, const FW::Vec3f& d, const FW::Vec3f& E, const size_t bounce, Node** buffer, std::vector<Hit>& tmpHitList, const float n1)
 {
-	FW::Random randomGen = FW::Random(m_photons.size());
-	const Triangle& tri = previousHit.triangle;
-	const TriangleToMeshData* data = (TriangleToMeshData*) previousHit.triangle.m_userPointer;
-	FW::Vec3f normalPrevious = (interpolateAttribute(tri, getDiversion(previousHit.intersectionPoint,tri), m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
-	normalPrevious = normalPrevious.normalized();
-
-	FW::Vec3f org = previous.pos + 0.001f * normalPrevious;
-	FW::Vec3f dir = randomVectorToHalfUnitSphere(normalPrevious, randomGen);
-
-	Hit newHit = Hit(10.f);
-	if(!RayTracer::get().rayCast(org, dir, newHit, m_triangles, m_indexListFromScene, m_sceneTree, buffer))
+	if(bounce >= maxBounces)
 		return;
+	
+	FW::Vec3f dir = d.normalized();
+	Hit hit = Hit(10.f);
+	if(!RayTracer::get().rayCast(orig, dir, hit, m_triangles, m_indexListFromScene, m_sceneTree, buffer))
+	{
+		return;
+	}
 
-	const TriangleToMeshData* mapPrevious = (const TriangleToMeshData*) previousHit.triangle.m_userPointer;
-	FW::Vec3f barysPrevious = FW::Vec3f((1.0f - previousHit.u - previousHit.v, previousHit.u, previousHit.v));
-	FW::Vec3f albedoPrevious = getAlbedo(mapPrevious, m_mesh,barysPrevious);
+	const Triangle& tri = hit.triangle;
+	FW::MeshBase::Material mat;
+	MaterialPM matType = shader(hit, m_mesh, mat);
+	FW::Vec3f n = interpolateAttribute(tri, hit.intersectionPoint, m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal));
+	n = n.normalized();
+	FW::Vec3f newOrig = hit.intersectionPoint + .0001f * n;
 
-	FW::Vec3f newNormal = (interpolateAttribute(newHit.triangle, getDiversion(newHit.intersectionPoint,newHit.triangle), m_mesh, m_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
-	newNormal = newNormal.normalized();
-	FW::Vec3f pow = previous.power * albedoPrevious * FW::dot(newNormal, -dir);
+	if(matType == MaterialPM_Mirror)
+	{
+		FW::Vec3f newDir = dir - 2.f*FW::dot(dir, n)*n;
+		newDir = dir.normalized();
+		tracePhoton(newOrig, newDir, E, bounce + 1, buffer, tmpHitList);		
+	}
+	else if(matType == MaterialPM_GlassSolid)
+	{
+		const float n2 = mat.opticalDensity;
+		const float nDiv = (n1/n2);
+		bool toDenser = (n1 <= n2);
 
-	Photon photon = Photon(newHit.intersectionPoint, pow, -(dir.normalized()));
-	m_photons.push_back(photon);
-	tmpHitList.push_back(newHit);
+		// Dot product of I-ray and surface normal, this is also the cosine of I-ray's angle since Iray and n are unit lenght
+		const float dotI = FW::dot(-dir, n);
+		
+		// If we are moving to lighter, this means we are inside a mesh => flip normal
+		if(!toDenser)
+			n = -n;
 
-	const TriangleToMeshData* mapNew = (const TriangleToMeshData*) newHit.triangle.m_userPointer;
-	FW::Vec3f barysNew = FW::Vec3f((1.0f - newHit.u - newHit.v, newHit.u, newHit.v));
-	FW::Vec3f albedoNew = getAlbedo(mapNew, m_mesh,barysNew);
+		FW::Vec3f transmittanceDir = (-nDiv * (-dir - dotI*n) -n*FW::sqrt(1.f-(nDiv*nDiv)*(1-(dotI*dotI)))).normalized();
+		FW::Vec3f reflectanceDir = (2.f*FW::dot(-dir, n)*n-dir).normalized();
 
-	float threshold = (albedoNew.x + albedoNew.y + albedoNew.z)/3.f;
-	float r3 = randomGen.getF32(0,1.0f);
-	if(r3 < threshold)
-		castIndirectLight(photon, newHit, buffer, tmpHitList);
+		//Schlick's approximation
+		float RShclick;
+		float R0 = std::pow(((n1-n2)/(n1+n2)), 2);
+		
+		//From lighter to denser 
+		if(toDenser)
+			RShclick = R0 + (1-R0)*std::pow((1.f-dotI),5);
+		else
+		{
+			//Define if there is Total Iternal Reflection
+			if(FW::asin(n2/n1) >= FW::acos(dotI))
+				RShclick = 1.f;
+			else
+			{
+				//Cosine of T-ray and normal. NB! We are still inside the mesh, but we fliped normal earlier 
+				const float dotT = FW::dot(transmittanceDir, -n);
+				RShclick = R0 + (1-R0)*std::pow((1.f-dotT),5);
+			}
+		}
+
+		float r = m_randomGen.getF32(.0f, 1.f);
+		if(r < RShclick && toDenser) //To denser, reflected
+			tracePhoton(newOrig, reflectanceDir, E * mat.specular, bounce + 1, buffer, tmpHitList);
+		else if (r >= RShclick && toDenser) //To denser, refraction
+			tracePhoton(newOrig, transmittanceDir, E, bounce + 1, buffer, tmpHitList, n2);
+		else if(r < RShclick && !toDenser) //To lighter, reflected
+			tracePhoton(newOrig, reflectanceDir, E, bounce + 1, buffer, tmpHitList, n2);
+		else if (r >= RShclick && !toDenser) //To lighter, refraction
+			tracePhoton(newOrig, transmittanceDir, E, bounce + 1, buffer, tmpHitList);
+	}
+	else if(matType == MaterialPM_Lightsource)
+	{
+		FW::Vec3f newDir = randomVectorToHalfUnitSphere(n, m_randomGen);
+		tracePhoton(newOrig, newDir, E, bounce+1, buffer, tmpHitList); 
+	}
+	else if(matType == MaterialPM_Diffuse)
+	{
+		FW::Vec3f albedo = getAlbedo((TriangleToMeshData*) hit.triangle.m_userPointer, m_mesh, FW::Vec3f((1.0f - hit.u - hit.v, hit.u, hit.v)));
+		FW::Vec3f newE = E * FW::dot(n, -dir);
+		FW::Vec3f newDir = randomVectorToHalfUnitSphere(n, m_randomGen);
+
+		Photon photon = Photon(hit.intersectionPoint, newE, -(dir.normalized()));
+		m_photons.push_back(photon);
+		tmpHitList.push_back(hit);
+
+		float r3 = m_randomGen.getF32(0,1.f);
+		float threshold = (albedo.x + albedo.y + albedo.z)/3.f;
+		if(r3 < threshold)
+			tracePhoton(newOrig, newDir, newE * albedo, bounce+1, buffer, tmpHitList);
+	}
 }
 
 void Renderer::initPhotonMaping(const size_t numOfPhotons, const float r, const size_t FG, const float totalLight, const size_t numberOfSamplesByDimension,const FW::Vec2i& size)
@@ -260,7 +294,7 @@ void Renderer::initPhotonMaping(const size_t numOfPhotons, const float r, const 
 	std::vector<Hit> tmpHitList;
 	tmpHitList.reserve(numOfPhotons);
 	updatePhotonListCapasity(numOfPhotons);
-	castDirectLight(numOfPhotons, tmpHitList);
+	castPhotons(numOfPhotons, tmpHitList);
 	m_hasPhotonMap = true;
 	
 	std::cout << " done! " << m_photons.size() << " photons total!" << std::endl;
@@ -329,7 +363,7 @@ void Renderer::outgoingLightFunc(FW::MulticoreLauncher::Task& t)
 		Hit& h = (*data.d_tmpHitList)[index];
 		std::vector<HeapNode> nodes;
 		float r = data.d_FGRadius;
-		RayTracer::get().searchPhotons(h.intersectionPoint, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, 10u, nodes, buffer);
+		RayTracer::get().searchPhotons(h.intersectionPoint, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, 50u, nodes, buffer);
 
 		if(nodes.empty())
 		{
@@ -338,7 +372,7 @@ void Renderer::outgoingLightFunc(FW::MulticoreLauncher::Task& t)
 		}
 
 		const Triangle& tri = h.triangle;
-		FW::Vec3f normal = (interpolateAttribute(tri, getDiversion(h.intersectionPoint,tri), data.d_mesh, data.d_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
+		FW::Vec3f normal = (interpolateAttribute(tri, h.intersectionPoint, data.d_mesh, data.d_mesh->findAttrib(FW::MeshBase::AttribType_Normal)));
 		normal = normal.normalized();
 
 		const float alpha = 10.818f;
@@ -417,46 +451,21 @@ void Renderer::imageScanline(FW::MulticoreLauncher::Task& t)
 			FW::Vec4f Rdh = (data.d_invP * P1);
 			FW::Vec3f Rd = (Rdh * (1.0f / Rdh.w)).getXYZ();
 
-			Rd = Rd - Ro;
-			Hit h = Hit(10.f);
-			MaterialPM type;
-			if(type = traceRay(Ro, Rd.normalized(), h, *data.d_triangles, *data.d_indexListFromScene, data.d_sceneTree, buffer, data.d_mesh))
-			{
-				if(type != MaterialPM_None)
-				{	
-					FW::Vec3f albedo = getAlbedo((TriangleToMeshData*) h.triangle.m_userPointer, data.d_mesh, FW::Vec3f(1.f-h.u-h.v, h.u, h.v));				
-					FW::Vec3f dir = (-Rd).normalized();
-					FW::Vec3f tmp;
-					if(shader(h, data.d_mesh) == MaterialPM_Lightsource)
-					{
-						Triangle& tri = h.triangle;
-						FW::Vec3f normal = (interpolateAttribute(tri, getDiversion(h.intersectionPoint,tri), data.d_mesh, data.d_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
-						normal = normal.normalized();
-						float dot = FW::dot(dir, normal);
-						if(dot < 0)
-							dot = FW::dot(dir, -normal);
-				
-						E += *(((*data.d_triangles)[h.i]).m_lightPower) * albedo * dot * data.d_totalLight; 
-					}
-					else
-					{
-						E += albedo * finalGathering(h,dir,data, buffer) * w;
-					}
-				}
-				totalW += w;
-			}
+			Rd = Rd - Ro;				
+			E += traceRay(Ro, Rd, data, buffer, 0u);
+			totalW += w;
 		}
 		E *= 1.f/totalW;
 		data.d_image->setVec4f(FW::Vec2i(x,y), FW::Vec4f(E, 1.f));
 	}
 }
 
-FW::Vec3f Renderer::finalGathering(const Hit& h, const FW::Vec3f& dir, const contextData& data, Node** buffer)
+FW::Vec3f Renderer::finalGathering(const FW::Vec3f& pos, const FW::Vec3f& normal, const contextData& data, Node** buffer, const size_t rays)
 {
-	if(data.d_numberOfFGRays == 1)
+	if(rays == 1)
 	{
 		float r = data.d_FGRadius;
-		int index = RayTracer::get().findNearestPhoton(h.intersectionPoint, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, buffer);
+		int index = RayTracer::get().findNearestPhoton(pos, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, buffer);
 		if(index == -1)
 			return FW::Vec3f();
 		else
@@ -464,64 +473,175 @@ FW::Vec3f Renderer::finalGathering(const Hit& h, const FW::Vec3f& dir, const con
 	}
 	else
 	{
-		FW::Vec3f normal = (interpolateAttribute(h.triangle, getDiversion(h.intersectionPoint,h.triangle), data.d_mesh, data.d_mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
-		normal = normal.normalized();
-		FW::Vec3f org = h.intersectionPoint + 0.001f * normal;
+		FW::Vec3f org = pos + 0.001f * normal;
 		FW::Vec3f total = FW::Vec3f();
 		FW::Random random = FW::Random();
 		for(auto i = 0u; i < data.d_numberOfFGRays; ++i)
 		{	
 			FW::Vec3f dir = randomVectorToHalfUnitSphere(normal, random);
 			Hit hit = Hit(10.f);
-			if(traceRay(org, dir, hit, *data.d_triangles, *data.d_indexListFromScene, data.d_sceneTree, buffer, data.d_mesh) == MaterialPM_None)
-				continue;
-			float r = data.d_FGRadius;
-			int index = RayTracer::get().findNearestPhoton(hit.intersectionPoint, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, buffer);
-			if(index == -1)
-				continue;
-			total += (*data.d_photons)[index].E;
+			total += traceRay(org, dir, data, buffer, 0u, true);
 		}
-		total *= 1.f/(float) data.d_numberOfFGRays;
+		total *= 1.f/(float) rays;
 		return total;
 	}
 };
 
-MaterialPM Renderer::traceRay(const FW::Vec3f& origin, const FW::Vec3f& direction, Hit& hit, const std::vector<Triangle>& triangles, const std::vector<size_t>& indexList, Node* root, Node** buffer, MeshC* mesh)
+FW::Vec3f Renderer::traceRay(const FW::Vec3f& orig, const FW::Vec3f& d, const contextData& data, Node** buffer, const size_t bounce, bool FGRay, const float n1)
 {
-	FW::Vec3f orig = origin;
-	FW::Vec3f dir = direction.normalized();
-	size_t bounce = 0u;
-	const size_t maxBounces = 10u;
-	while(bounce < maxBounces)
+	const FW::Vec3f dir = d.normalized();
+	MeshC* mesh = data.d_mesh;
+
+	if(bounce >= maxBounces)
+		return FW::Vec3f(.95, .0f, .95f);
+	
+	Hit hit = Hit(10.f);
+	if(!RayTracer::get().rayCast(orig, dir, hit, *(data.d_triangles), *(data.d_indexListFromScene), data.d_sceneTree, buffer))
 	{
-		if(!RayTracer::get().rayCast(orig, dir, hit, triangles, indexList, root, buffer))
-			return MaterialPM_None;
-		
-		MaterialPM matType = shader(hit, mesh);
-		if(matType == MaterialPM_Mirror)
-		{
-			FW::Vec3f n = (interpolateAttribute(hit.triangle, getDiversion(orig,hit.triangle), mesh, mesh->findAttrib(FW::MeshBase::AttribType_Normal))).getXYZ();
-			n = n.normalized();
-			orig = hit.intersectionPoint + .0001f * n;
-			dir = dir - 2.f*FW::dot(dir, n)*n;
-			bounce++;
-			//std::cout << "Mirror: " << bounce << std::endl;
-			continue;
-		}
-		else
-			return matType;	
+		hit.t = -1.f;
+		return FW::Vec3f();
 	}
-	return MaterialPM_None;
+
+	const Triangle& tri = hit.triangle;
+	FW::MeshBase::Material mat;
+	MaterialPM matType = shader(hit, mesh, mat);
+	FW::Vec3f n = (interpolateAttribute(tri, hit.intersectionPoint, mesh, mesh->findAttrib(FW::MeshBase::AttribType_Normal)));
+	n = n.normalized();
+	FW::Vec3f newOrig = hit.intersectionPoint + 0.0001f * n;
+
+	if(matType == MaterialPM_Lightsource)
+	{
+		Triangle& tri = hit.triangle;
+		FW::Vec3f albedo = getAlbedo((TriangleToMeshData*) hit.triangle.m_userPointer, mesh,FW::Vec3f(1.f-hit.u-hit.v, hit.u, hit.v));
+		float dot = FW::dot(-dir, n);	
+		if(dot < 0)
+			dot = FW::dot(-dir, -n);
+				
+		return *(*data.d_triangles)[hit.i].m_lightPower * albedo * dot * data.d_totalLight; 
+	}
+	else if(matType == MaterialPM_Diffuse)
+	{
+		FW::Vec3f albedo = getAlbedo((TriangleToMeshData*) hit.triangle.m_userPointer, mesh, FW::Vec3f(1.f-hit.u-hit.v, hit.u, hit.v));
+		size_t rays = 1u;
+		if(!FGRay)
+			rays = data.d_numberOfFGRays;
+		
+		return albedo * finalGathering(newOrig, n, data, buffer, rays);
+	}
+	else if(matType == MaterialPM_Mirror)
+	{
+		FW::Vec3f newDir = dir - 2.f*FW::dot(dir, n)*n;
+		newDir = newDir.normalized();
+		return traceRay(newOrig, newDir, data, buffer, bounce + 1, FGRay);		
+	}
+
+	/*Microfaced BRDF*/
+	float n2;
+	if(n1 < 1.001f)
+		n2 = mat.opticalDensity;
+	else
+		n2 = 1.f;
+
+	const float nDiv = (n1/n2);
+	bool toDenser = (n1 < n2);
+	if(!toDenser)
+		n *= -1.f;
+
+	FW::Vec3f reflectionDir = (2.f*FW::dot(-dir, n)*n-dir).normalized();
+	
+	// Dot product of I-ray and surface normal, this is also the cosine of I-ray's angle since Iray and n are unit lenght
+	float dotI = FW::dot(-dir, n);
+	if(dotI < 0.f)
+	{
+		return traceRay(hit.intersectionPoint + n*.0001f, reflectionDir, data, buffer, bounce + 1, FGRay);
+	}
+
+	//Fresnel term -> Schlick's approximation
+	float RShclick = 0.f;
+	FW::Vec3f refractionDir = FW::Vec3f();
+	bool TIR = false;
+
+	if(!toDenser)
+	{
+		float critalangle = std::asin(n2/n1);
+		float incomingAngle = std::acos(dotI);
+		if(critalangle <= incomingAngle)
+		{
+			TIR = true;
+			RShclick = 1.f;
+		}
+	}
+
+	if(!TIR)
+		refractionDir =  (nDiv*dir-(nDiv*dotI+FW::sqrt(1.f-(nDiv*nDiv)*(1.f-dotI*dotI)))*n).normalized();
+
+	float R0 = std::pow(((n1-n2)/(n1+n2)), 2);
+
+
+	if(toDenser)
+		RShclick = R0 + (1-R0)*std::pow((1.f-dotI),5);
+	else
+	{
+		if(!TIR)
+		{
+			//Cosine of T-ray and normal. NB! We are still inside the mesh, but we fliped normal earlier
+			float dotT = FW::dot(refractionDir, -n);
+			RShclick = R0 + (1-R0)*std::pow((1.f-dotT),5);
+		}
+	}
+
+	/*//Distripution term, Beckmann NDF
+	const float e = 2.718281f;
+	const float m = mat.roughness;
+	const FW::Vec3f hVec = (-dir + (data.d_lightPosEstimate-hit.intersectionPoint).normalized())*.5f;
+	const float dotHN = FW::dot(hVec, n);
+	const float exp = (dotHN*dotHN-1.f)/(m*m*dotHN*dotHN);
+	const float D = std::pow(e,exp)/(m*m*std::pow(dotHN, 4));
+
+	//Calculate BRDF with visibility term being 1.f
+	float BRDF = RShclick * D * .25f;*/
+
+	if(matType == MaterialPM_GlassSolid)
+	{
+		FW::Vec3f reflection = FW::Vec3f();
+		FW::Vec3f refraction = FW::Vec3f();
+		if(bounce < 5u)
+		{
+			if(toDenser)
+				reflection = RShclick * traceRay(hit.intersectionPoint + n*.0001f, reflectionDir, data, buffer, bounce + 1, FGRay);
+			else
+				reflection = RShclick * traceRay(hit.intersectionPoint + n*.0001f, reflectionDir, data, buffer, bounce + 1, FGRay, n2);
+		}
+		if(!TIR)
+		{
+			float tmp = FW::dot(refractionDir, -n);
+			if(toDenser)
+				refraction = (1.f-RShclick)*traceRay(hit.intersectionPoint - n*.0001f, refractionDir, data, buffer, bounce + 1, FGRay, n2);
+			else
+				refraction = (1.f-RShclick)*traceRay(hit.intersectionPoint - n*.0001f, refractionDir, data, buffer, bounce + 1, FGRay);
+		}
+
+		return reflection + refraction;
+	}
+
+	return FW::Vec3f();
 }
 
 MaterialPM Renderer::shader(const Hit& h, MeshC* mesh)
 {
+	return shader(h, mesh, FW::MeshBase::Material());
+}
+
+MaterialPM Renderer::shader(const Hit& h, MeshC* mesh, FW::MeshBase::Material& mat)
+{
 	const TriangleToMeshData* data = (TriangleToMeshData*) h.triangle.m_userPointer;
-	const FW::MeshBase::Material mat = mesh->material(data->submeshIndex);
+	mat = mesh->material(data->submeshIndex);
 	if(mat.emissive != FW::Vec3f())
 		return  MaterialPM_Lightsource;
-	if(mat.illuminationModel == 5u || mat.illuminationModel == 7u)
+	if(mat.illuminationModel == 5u)
 		return MaterialPM_Mirror;
+	if(mat.illuminationModel == 7u)
+		return MaterialPM_GlassSolid;
 	else
 		return MaterialPM_Diffuse; 
 }
@@ -594,7 +714,7 @@ void Renderer::drawTriangleToCamera(const FW::Vec3f& pos, const FW::Vec4f& color
         indices.add(indexArray[i] + base);
 }
 
-FW::Vec3f Renderer::getAlbedo(const TriangleToMeshData* map, const MeshC* mesh, const FW::Vec3f& barys )
+FW::Vec3f Renderer::getAlbedo(const TriangleToMeshData* map, const MeshC* mesh, const FW::Vec3f& barys)
 {
 	FW::Vec3f Kd;
 	const FW::MeshBase::Material& mat = mesh->material(map->submeshIndex);
@@ -636,25 +756,39 @@ FW::Vec3f Renderer::getAlbedo(const TriangleToMeshData* map, const MeshC* mesh, 
 	return Kd;
 }
 
-FW::Vec4f Renderer::interpolateAttribute(const Triangle& tri, const FW::Vec3f& div, const FW::MeshBase* mesh, int attribidx )
+FW::Vec3f Renderer::interpolateAttribute(const Triangle& tri, const FW::Vec3f& p, const FW::MeshBase* mesh, int attribidx )
 {
 	const TriangleToMeshData* map = (const TriangleToMeshData*)tri.m_userPointer;
 
-	FW::Vec4f v[3];
-	v[0] = mesh->getVertexAttrib( mesh->indices(map->submeshIndex)[map->vertexIndex][0], attribidx );
-	v[1] = mesh->getVertexAttrib( mesh->indices(map->submeshIndex)[map->vertexIndex][1], attribidx );
-	v[2] = mesh->getVertexAttrib( mesh->indices(map->submeshIndex)[map->vertexIndex][2], attribidx );
-	return div.x*v[0] + div.y*v[1] + div.z*v[2];
+	FW::Vec3f barys = getBarys(tri, p, mesh);
+
+	FW::Vec3f v[3];
+	v[0] = mesh->getVertexAttrib( mesh->indices(map->submeshIndex)[map->vertexIndex][0], attribidx ).getXYZ();
+	v[1] = mesh->getVertexAttrib( mesh->indices(map->submeshIndex)[map->vertexIndex][1], attribidx ).getXYZ();
+	v[2] = mesh->getVertexAttrib( mesh->indices(map->submeshIndex)[map->vertexIndex][2], attribidx ).getXYZ();
+
+	return barys[0]*v[0] + barys[1]*v[1] + barys[2]*v[2];
 }
 
-FW::Vec3f Renderer::getDiversion(const FW::Vec3f& p, const Triangle& tri)
+FW::Vec3f Renderer::getBarys(const Triangle& tri, const FW::Vec3f& p, const FW::MeshBase* mesh)
 {
-	float A = (*tri.m_vertices[0] - p).length();
-	float B = (*tri.m_vertices[1] - p).length();
-	float C = (*tri.m_vertices[2] - p).length();
-	float total = A + B + C;
+	const TriangleToMeshData* map = (const TriangleToMeshData*)tri.m_userPointer;
+	int posIndex = mesh->findAttrib(FW::MeshBase::AttribType_Position);
+	FW::Vec3f pos[3];
+	pos[0] = mesh->getVertexAttrib( mesh->indices(map->submeshIndex)[map->vertexIndex][0], posIndex ).getXYZ();
+	pos[1] = mesh->getVertexAttrib( mesh->indices(map->submeshIndex)[map->vertexIndex][1], posIndex ).getXYZ();
+	pos[2] = mesh->getVertexAttrib( mesh->indices(map->submeshIndex)[map->vertexIndex][2], posIndex ).getXYZ();
+	
+	FW::Vec3f f[3];
+	f[0] = pos[0] - p;
+	f[1] = pos[1] - p;
+	f[2] = pos[2] - p;
 
-	return FW::Vec3f(A/total, B/total, C/total);
+	float aTotal = FW::cross(pos[0]-pos[1], pos[0] - pos[2]).length();
+	float a1 = FW::cross(f[1], f[2]).length() / aTotal;
+	float a2 = FW::cross(f[2], f[0]).length() / aTotal;
+	float a3 = FW::cross(f[0], f[1]).length() / aTotal;
+	return FW::Vec3f(a1, a2, a3);
 }
 
 void Renderer::drawPhotonMap()

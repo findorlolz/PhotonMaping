@@ -8,6 +8,8 @@
 
 typedef FW::Mesh<FW::VertexPNTC> MeshC;
 
+const size_t maxBounces = 10u;
+
 class RayTracer;
 class Sampling;
 
@@ -16,6 +18,7 @@ enum MaterialPM
 	MaterialPM_Lightsource,
 	MaterialPM_Diffuse,
 	MaterialPM_Mirror,
+	MaterialPM_GlassSolid,
 	MaterialPM_None
 };
 
@@ -58,8 +61,9 @@ private:
 		 Renderer() {}
         ~Renderer() {}
 
-		void castIndirectLight(const Photon&, const Hit& hit, Node**, std::vector<Hit>&);
-		void castDirectLight(const size_t, std::vector<Hit>&);
+		void castPhotons(const size_t numOfPhotons, std::vector<Hit>& tmpHitList);
+		void tracePhoton(const FW::Vec3f&, const FW::Vec3f&, const FW::Vec3f&, const size_t, Node**, std::vector<Hit>&, const float n1 = 1.f);
+
 		void preCalculateOutgoingLight(std::vector<Hit>&);
 		static void outgoingLightFunc(FW::MulticoreLauncher::Task&);
 
@@ -78,6 +82,7 @@ private:
 		struct contextData
 		{
 			FW::Mat4f d_invP;
+			FW::Vec3f d_lightPosEstimate;
 			size_t d_numberOfFGRays;
 			size_t d_numberOfSamplesByDimension;
 			float d_FGRadius;
@@ -95,15 +100,16 @@ private:
 			Node* d_photonTree;		
 		};
 
-		static FW::Vec4f interpolateAttribute(const Triangle& tri, const FW::Vec3f&, const FW::MeshBase* mesh, int attribidx);
-		static FW::Vec3f getDiversion(const FW::Vec3f&, const Triangle&);
+		static FW::Vec3f getBarys(const Triangle& tri, const FW::Vec3f& p, const FW::MeshBase* mesh);
+		static FW::Vec3f interpolateAttribute(const Triangle& tri, const FW::Vec3f&, const FW::MeshBase* mesh, int attribidx);
 		static FW::Vec3f getAlbedo(const TriangleToMeshData*, const MeshC*, const FW::Vec3f&);
 		static FW::Vec3f randomVectorToHalfUnitSphere(const FW::Vec3f&, FW::Random&);
-		static MaterialPM traceRay(const FW::Vec3f&, const FW::Vec3f&, Hit&, const std::vector<Triangle>&, const std::vector<size_t>&, Node*, Node**, MeshC*);
+		static FW::Vec3f traceRay(const FW::Vec3f&, const FW::Vec3f&, const contextData&, Node**, const size_t, bool = false, const float = 1.f);
 		
-		static FW::Vec3f finalGathering(const Hit&, const FW::Vec3f&, const contextData&, Node**);
+		static FW::Vec3f finalGathering(const FW::Vec3f&, const FW::Vec3f&, const contextData&, Node**, const size_t);
 
 		static MaterialPM shader(const Hit&, MeshC*);
+		static MaterialPM shader(const Hit&, MeshC*, FW::MeshBase::Material&);
 
 		FW::Random m_randomGen;
 		
