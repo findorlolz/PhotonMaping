@@ -8,6 +8,14 @@
 #include <base/Math.hpp>
 #include <iostream>
 
+/*//Distripution term, Beckmann NDF
+const float e = 2.718281f;
+const float m = mat.roughness;
+const FW::Vec3f hVec = (-dir + (data.d_lightPosEstimate-hit.intersectionPoint).normalized())*.5f;
+const float dotHN = FW::dot(hVec, n);
+const float exp = (dotHN*dotHN-1.f)/(m*m*dotHN*dotHN);
+const float D = std::pow(e,exp)/(m*m*std::pow(dotHN, 4));*/
+
 enum Axis
 {
 	Xa,

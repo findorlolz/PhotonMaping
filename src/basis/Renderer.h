@@ -19,6 +19,7 @@ enum MaterialPM
 	MaterialPM_Diffuse,
 	MaterialPM_Mirror,
 	MaterialPM_GlassSolid,
+	MaterialPM_GlassBillboard,
 	MaterialPM_None
 };
 

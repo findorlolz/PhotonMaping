@@ -217,6 +217,7 @@ void Renderer::tracePhoton(const FW::Vec3f& orig, const FW::Vec3f& d, const FW::
 		if(!toDenser)
 			n = -n;
 
+		//Define directions of both refraction and reflection
 		FW::Vec3f transmittanceDir = (-nDiv * (-dir - dotI*n) -n*FW::sqrt(1.f-(nDiv*nDiv)*(1-(dotI*dotI)))).normalized();
 		FW::Vec3f reflectanceDir = (2.f*FW::dot(-dir, n)*n-dir).normalized();
 
@@ -240,23 +241,50 @@ void Renderer::tracePhoton(const FW::Vec3f& orig, const FW::Vec3f& d, const FW::
 			}
 		}
 
+		//Russian roulette based on Shclick approximation and size of n1 and n2
 		float r = m_randomGen.getF32(.0f, 1.f);
 		if(r < RShclick && toDenser) //To denser, reflected
 			tracePhoton(newOrig, reflectanceDir, E * mat.specular, bounce + 1, buffer, tmpHitList);
 		else if (r >= RShclick && toDenser) //To denser, refraction
-			tracePhoton(newOrig, transmittanceDir, E, bounce + 1, buffer, tmpHitList, n2);
+			tracePhoton(hit.intersectionPoint - .0001f * n, transmittanceDir, E, bounce + 1, buffer, tmpHitList, n2);
 		else if(r < RShclick && !toDenser) //To lighter, reflected
 			tracePhoton(newOrig, reflectanceDir, E, bounce + 1, buffer, tmpHitList, n2);
 		else if (r >= RShclick && !toDenser) //To lighter, refraction
-			tracePhoton(newOrig, transmittanceDir, E, bounce + 1, buffer, tmpHitList);
+			tracePhoton(hit.intersectionPoint - .0001f * n, transmittanceDir, E, bounce + 1, buffer, tmpHitList);
+	}
+	else if (matType == MaterialPM_GlassBillboard)
+	{
+		const float n2 = mat.opticalDensity;
+		const float nDiv = (n1/n2);
+
+		//Billboard is just surface, which each vertex has same normal => if hit comes from behind whe just swap this normal around.
+		float dotI = FW::dot(-dir, n);
+		if(dotI < .0f)
+		{
+			n *= -1.f;
+			dotI = FW::dot(-dir, n);
+		}
+		
+		//Unlike with real glass, with billboard always n1<n2 which makes things easier 
+		float R0 = std::pow(((n1-n2)/(n1+n2)), 2);
+		float RShclick = R0 + (1-R0)*std::pow((1.f-dotI),5);
+
+		//Russian roulette based on Shclick approximation
+		float r = m_randomGen.getF32(.0f, 1.f);
+		if(r < RShclick)
+			tracePhoton(hit.intersectionPoint + 0.0001f * n, (2.f*FW::dot(-dir, n)*n-dir).normalized(), E, bounce+1, buffer, tmpHitList);
+		else
+			tracePhoton(hit.intersectionPoint - 0.0001f * n, (-nDiv * (-dir - dotI*n) -n*FW::sqrt(1.f-(nDiv*nDiv)*(1-(dotI*dotI)))).normalized(), E, bounce+1, buffer, tmpHitList);
 	}
 	else if(matType == MaterialPM_Lightsource)
 	{
+		//Photon hits a lightsource, for not losing energy cast a new one from that source.
 		FW::Vec3f newDir = randomVectorToHalfUnitSphere(n, m_randomGen);
 		tracePhoton(newOrig, newDir, E, bounce+1, buffer, tmpHitList); 
 	}
 	else if(matType == MaterialPM_Diffuse)
 	{
+		//Ideal diffuse BRDF
 		FW::Vec3f albedo = getAlbedo((TriangleToMeshData*) hit.triangle.m_userPointer, m_mesh, FW::Vec3f((1.0f - hit.u - hit.v, hit.u, hit.v)));
 		FW::Vec3f newE = E * FW::dot(n, -dir);
 		FW::Vec3f newDir = randomVectorToHalfUnitSphere(n, m_randomGen);
@@ -534,77 +562,69 @@ FW::Vec3f Renderer::traceRay(const FW::Vec3f& orig, const FW::Vec3f& d, const co
 		newDir = newDir.normalized();
 		return traceRay(newOrig, newDir, data, buffer, bounce + 1, FGRay);		
 	}
+	else if(matType == MaterialPM_GlassSolid)
+	{
+		float n2;
+		if(n1 < 1.001f)
+			n2 = mat.opticalDensity;
+		else
+			n2 = 1.f;
 
-	/*Microfaced BRDF*/
-	float n2;
-	if(n1 < 1.001f)
-		n2 = mat.opticalDensity;
-	else
-		n2 = 1.f;
+		const float nDiv = (n1/n2);
+		bool toDenser = (n1 < n2);
+		if(!toDenser)
+			n *= -1.f;
 
-	const float nDiv = (n1/n2);
-	bool toDenser = (n1 < n2);
-	if(!toDenser)
-		n *= -1.f;
-
-	FW::Vec3f reflectionDir = (2.f*FW::dot(-dir, n)*n-dir).normalized();
+		//Define direction of reflection.
+		FW::Vec3f reflectionDir = (2.f*FW::dot(-dir, n)*n-dir).normalized();
 	
-	// Dot product of I-ray and surface normal, this is also the cosine of I-ray's angle since Iray and n are unit lenght
-	float dotI = FW::dot(-dir, n);
-	if(dotI < 0.f)
-	{
-		return traceRay(hit.intersectionPoint + n*.0001f, reflectionDir, data, buffer, bounce + 1, FGRay);
-	}
-
-	//Fresnel term -> Schlick's approximation
-	float RShclick = 0.f;
-	FW::Vec3f refractionDir = FW::Vec3f();
-	bool TIR = false;
-
-	if(!toDenser)
-	{
-		float critalangle = std::asin(n2/n1);
-		float incomingAngle = std::acos(dotI);
-		if(critalangle <= incomingAngle)
+		// Dot product of I-ray and surface normal, this is also the cosine of I-ray's angle since Iray and n are unit lenght
+		float dotI = FW::dot(-dir, n);
+		//Special case, angle between incoming light and normal that is interpolated from vertex is greater than PI. We dodge this by doing TIR as ideal mirror.
+		if(dotI < 0.f)
 		{
-			TIR = true;
-			RShclick = 1.f;
+			return traceRay(hit.intersectionPoint + n*.0001f, reflectionDir, data, buffer, bounce + 1, FGRay);
 		}
-	}
 
-	if(!TIR)
-		refractionDir =  (nDiv*dir-(nDiv*dotI+FW::sqrt(1.f-(nDiv*nDiv)*(1.f-dotI*dotI)))*n).normalized();
+		//Fresnel term -> Schlick's approximation
+		float RShclick = 0.f;
+		FW::Vec3f refractionDir = FW::Vec3f();
+		bool TIR = false;
 
-	float R0 = std::pow(((n1-n2)/(n1+n2)), 2);
+		// n1 > n2
+		if(!toDenser)
+		{
+			// Check if there is TIR, aka crital angle <= angle between incoming light and surface normal
+			if(std::asin(n2/n1) <= std::acos(dotI))
+			{
+				TIR = true;
+				RShclick = 1.f;
+			}
+		}
 
-
-	if(toDenser)
-		RShclick = R0 + (1-R0)*std::pow((1.f-dotI),5);
-	else
-	{
+		//There is no TIR => define refraction direction
 		if(!TIR)
+			refractionDir =  (nDiv*dir-(nDiv*dotI+FW::sqrt(1.f-(nDiv*nDiv)*(1.f-dotI*dotI)))*n).normalized();
+
+		float R0 = std::pow(((n1-n2)/(n1+n2)), 2);
+
+		//Shclick approxmation case 1, n1 < n2
+		if(toDenser)
+			RShclick = R0 + (1-R0)*std::pow((1.f-dotI),5);
+		else
 		{
-			//Cosine of T-ray and normal. NB! We are still inside the mesh, but we fliped normal earlier
-			float dotT = FW::dot(refractionDir, -n);
-			RShclick = R0 + (1-R0)*std::pow((1.f-dotT),5);
+			if(!TIR)
+			{
+				//Shclick approxrimation case 2, n1 > n2, no TIR
+				float dotT = FW::dot(refractionDir, -n);
+				RShclick = R0 + (1-R0)*std::pow((1.f-dotT),5);
+			}
 		}
-	}
 
-	/*//Distripution term, Beckmann NDF
-	const float e = 2.718281f;
-	const float m = mat.roughness;
-	const FW::Vec3f hVec = (-dir + (data.d_lightPosEstimate-hit.intersectionPoint).normalized())*.5f;
-	const float dotHN = FW::dot(hVec, n);
-	const float exp = (dotHN*dotHN-1.f)/(m*m*dotHN*dotHN);
-	const float D = std::pow(e,exp)/(m*m*std::pow(dotHN, 4));
-
-	//Calculate BRDF with visibility term being 1.f
-	float BRDF = RShclick * D * .25f;*/
-
-	if(matType == MaterialPM_GlassSolid)
-	{
 		FW::Vec3f reflection = FW::Vec3f();
 		FW::Vec3f refraction = FW::Vec3f();
+
+		//Reflection, if TIR => RShclick = 1.f. First one is n1 < n2 ray from outside glass object, seconed one is ray inside object.
 		if(bounce < 5u)
 		{
 			if(toDenser)
@@ -612,9 +632,9 @@ FW::Vec3f Renderer::traceRay(const FW::Vec3f& orig, const FW::Vec3f& d, const co
 			else
 				reflection = RShclick * traceRay(hit.intersectionPoint + n*.0001f, reflectionDir, data, buffer, bounce + 1, FGRay, n2);
 		}
+		//Refratino if there is no TIR, ray's movement same as above. To note, starting position of new ray must be behind of hit.
 		if(!TIR)
 		{
-			float tmp = FW::dot(refractionDir, -n);
 			if(toDenser)
 				refraction = (1.f-RShclick)*traceRay(hit.intersectionPoint - n*.0001f, refractionDir, data, buffer, bounce + 1, FGRay, n2);
 			else
@@ -623,7 +643,31 @@ FW::Vec3f Renderer::traceRay(const FW::Vec3f& orig, const FW::Vec3f& d, const co
 
 		return reflection + refraction;
 	}
+	else if (matType == MaterialPM_GlassBillboard)
+	{
+		const float n2 = mat.opticalDensity;
+		const float nDiv = (n1/n2);
 
+		//Billboard is just surface, which each vertex has same normal => if hit comes from behind whe just swap this normal around.
+		float dotI = FW::dot(-dir, n);
+		if(dotI < .0f)
+		{
+			n *= -1.f;
+			dotI = FW::dot(-dir, n);
+		}
+		
+		//Unlike with real glass, with billboard always n1<n2 which makes things easier 
+		float R0 = std::pow(((n1-n2)/(n1+n2)), 2);
+		float RShclick = R0 + (1-R0)*std::pow((1.f-dotI),5);
+
+		FW::Vec3f reflection = traceRay(hit.intersectionPoint + 0.0001f * n, (2.f*FW::dot(-dir, n)*n-dir).normalized(), data, buffer, bounce+1,FGRay);
+		FW::Vec3f refraction = traceRay(hit.intersectionPoint - 0.0001f * n, (-nDiv * (-dir - dotI*n) -n*FW::sqrt(1.f-(nDiv*nDiv)*(1-(dotI*dotI)))).normalized(), data, buffer, bounce+1, FGRay);
+
+		return RShclick * reflection + (1.f- RShclick) * refraction;
+	}
+
+	//To shut the compiler up, should never get here
+	std::cout << "ERROR - No material found" << std::endl;
 	return FW::Vec3f();
 }
 
