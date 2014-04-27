@@ -87,12 +87,13 @@ struct Photon
 {
 	Photon() {}
 	Photon(FW::Vec3f& p, FW::Vec3f& pow, FW::Vec3f& d) :
-		pos(p), power(pow), dir(d), E(FW::Vec3f()) {}
+		pos(p), power(pow), dir(d), E(FW::Vec3f()), g(false) {}
 
 	FW::Vec3f pos;
 	FW::Vec3f power;
 	FW::Vec3f dir;
 	FW::Vec3f E;
+	bool g;
 };
 
 inline static int indexBasedOnFloat(const float size, float value, float& d)

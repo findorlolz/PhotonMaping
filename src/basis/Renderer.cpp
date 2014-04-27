@@ -25,9 +25,7 @@ void Renderer::startUp(FW::GLContext* gl, FW::CameraControls* camera, AssetManag
 	m_hasPhotonMap = false;
 
 	m_mesh = new MeshC();
-	m_mesh->append(*(m_assetManager->getMesh(MeshType_CornellTest)));
-
-	m_mesh->collapseVertices();
+	m_mesh->append(*(m_assetManager->getMesh(MeshType_Pheonix)));
 
 	m_photonTestMesh = new FW::Mesh<FW::VertexPNC>();
 	m_photonTestMesh->addSubmesh();
@@ -102,8 +100,6 @@ void Renderer::updateTriangleToMeshDataPointers()
 		FW::Vec3f p = m_mesh->getVertexAttrib(i, FW::MeshBase::AttribType_Position).getXYZ();
 		m_vertices.push_back(p);
 	}
-
-	FW::Vec3f lightPosApp = FW::Vec3f();
 	for (size_t i = 0u; i < m_mesh->numSubmeshes(); ++i )
 	{
 		const FW::Array<FW::Vec3i>& idx = m_mesh->indices(i);
@@ -124,14 +120,10 @@ void Renderer::updateTriangleToMeshDataPointers()
 			{
 				t.m_lightPower = &(mat->emissive);
 				m_lightSources.push_back(m_triangles.size());
-				lightPosApp += (*(t.m_vertices[0])+*(t.m_vertices[1])+*(t.m_vertices[2]))/3.f;
 			}
 			m_triangles.push_back(t);
 		}
 	}
-
-	lightPosApp *= 1.f/(float)m_lightSources.size();
-	m_contextData.d_lightPosEstimate = lightPosApp;
 
 	for ( size_t i = 0; i < m_triangles.size(); ++i )
 		m_triangles[ i ].m_userPointer = &m_triangleToMeshData[i];
@@ -151,7 +143,7 @@ void Renderer::castPhotons(const size_t numOfPhotons, std::vector<Hit>& tmpHitLi
 	FW::Random randomGen = FW::Random();
 	Node* buffer[1028];
 
-	FW::Vec3f photonPower = FW::Vec3f(m_contextData.d_totalLight)/numOfPhotons; 
+	FW::Vec3f photonPower = FW::Vec3f(m_contextData.d_totalLight)/(numOfPhotons+m_lightSources.size()); 
 
 	for(auto i = 0u; i < m_lightSources.size(); ++i)
 	{
@@ -174,12 +166,12 @@ void Renderer::castPhotons(const size_t numOfPhotons, std::vector<Hit>& tmpHitLi
 			FW::Vec3f dir = randomVectorToHalfUnitSphere(normalLightSource, m_randomGen);
 			FW::Vec3f E = lightSourcePower * photonPower * albedoLightSource;
 
-			tracePhoton(orig, dir, E, 0u, buffer, tmpHitList);
+			tracePhoton(orig, dir, E, 0u, buffer, tmpHitList, false);
 		}
 	}
 }
 
-void Renderer::tracePhoton(const FW::Vec3f& orig, const FW::Vec3f& d, const FW::Vec3f& E, const size_t bounce, Node** buffer, std::vector<Hit>& tmpHitList, const float n1)
+void Renderer::tracePhoton(const FW::Vec3f& orig, const FW::Vec3f& d, const FW::Vec3f& E, const size_t bounce, Node** buffer, std::vector<Hit>& tmpHitList, bool g, const float n1)
 {
 	if(bounce >= maxBounces)
 		return;
@@ -202,7 +194,8 @@ void Renderer::tracePhoton(const FW::Vec3f& orig, const FW::Vec3f& d, const FW::
 	{
 		FW::Vec3f newDir = dir - 2.f*FW::dot(dir, n)*n;
 		newDir = dir.normalized();
-		tracePhoton(newOrig, newDir, E, bounce + 1, buffer, tmpHitList);		
+		FW::Vec3f newE = E * mat.tf; 
+		tracePhoton(newOrig, newDir, newE, bounce + 1, buffer, tmpHitList, g);		
 	}
 	else if(matType == MaterialPM_GlassSolid)
 	{
@@ -244,13 +237,13 @@ void Renderer::tracePhoton(const FW::Vec3f& orig, const FW::Vec3f& d, const FW::
 		//Russian roulette based on Shclick approximation and size of n1 and n2
 		float r = m_randomGen.getF32(.0f, 1.f);
 		if(r < RShclick && toDenser) //To denser, reflected
-			tracePhoton(newOrig, reflectanceDir, E * mat.specular, bounce + 1, buffer, tmpHitList);
+			tracePhoton(newOrig, reflectanceDir, E , bounce + 1, buffer, tmpHitList, g);
 		else if (r >= RShclick && toDenser) //To denser, refraction
-			tracePhoton(hit.intersectionPoint - .0001f * n, transmittanceDir, E, bounce + 1, buffer, tmpHitList, n2);
+			tracePhoton(hit.intersectionPoint - .0001f * n, transmittanceDir, E, bounce + 1, buffer, tmpHitList, true, n2);
 		else if(r < RShclick && !toDenser) //To lighter, reflected
-			tracePhoton(newOrig, reflectanceDir, E, bounce + 1, buffer, tmpHitList, n2);
+			tracePhoton(newOrig, reflectanceDir, E, bounce + 1, buffer, tmpHitList, g, n2);
 		else if (r >= RShclick && !toDenser) //To lighter, refraction
-			tracePhoton(hit.intersectionPoint - .0001f * n, transmittanceDir, E, bounce + 1, buffer, tmpHitList);
+			tracePhoton(hit.intersectionPoint - .0001f * n, transmittanceDir, E, bounce + 1, buffer, tmpHitList, g);
 	}
 	else if (matType == MaterialPM_GlassBillboard)
 	{
@@ -272,15 +265,15 @@ void Renderer::tracePhoton(const FW::Vec3f& orig, const FW::Vec3f& d, const FW::
 		//Russian roulette based on Shclick approximation
 		float r = m_randomGen.getF32(.0f, 1.f);
 		if(r < RShclick)
-			tracePhoton(hit.intersectionPoint + 0.0001f * n, (2.f*FW::dot(-dir, n)*n-dir).normalized(), E, bounce+1, buffer, tmpHitList);
+			tracePhoton(hit.intersectionPoint + 0.0001f * n, (2.f*FW::dot(-dir, n)*n-dir).normalized(), E, bounce+1, buffer, tmpHitList, g);
 		else
-			tracePhoton(hit.intersectionPoint - 0.0001f * n, (-nDiv * (-dir - dotI*n) -n*FW::sqrt(1.f-(nDiv*nDiv)*(1-(dotI*dotI)))).normalized(), E, bounce+1, buffer, tmpHitList);
+			tracePhoton(hit.intersectionPoint - 0.0001f * n, (-nDiv * (-dir - dotI*n) -n*FW::sqrt(1.f-(nDiv*nDiv)*(1-(dotI*dotI)))).normalized(), E, bounce+1, buffer, tmpHitList, g);
 	}
 	else if(matType == MaterialPM_Lightsource)
 	{
 		//Photon hits a lightsource, for not losing energy cast a new one from that source.
 		FW::Vec3f newDir = randomVectorToHalfUnitSphere(n, m_randomGen);
-		tracePhoton(newOrig, newDir, E, bounce+1, buffer, tmpHitList); 
+		tracePhoton(newOrig, newDir, E, bounce+1, buffer, tmpHitList, false); 
 	}
 	else if(matType == MaterialPM_Diffuse)
 	{
@@ -296,7 +289,7 @@ void Renderer::tracePhoton(const FW::Vec3f& orig, const FW::Vec3f& d, const FW::
 		float r3 = m_randomGen.getF32(0,1.f);
 		float threshold = (albedo.x + albedo.y + albedo.z)/3.f;
 		if(r3 < threshold)
-			tracePhoton(newOrig, newDir, newE * albedo, bounce+1, buffer, tmpHitList);
+			tracePhoton(newOrig, newDir, newE * albedo, bounce+1, buffer, tmpHitList, false);
 	}
 }
 
@@ -400,7 +393,7 @@ void Renderer::outgoingLightFunc(FW::MulticoreLauncher::Task& t)
 		}
 
 		const Triangle& tri = h.triangle;
-		FW::Vec3f normal = (interpolateAttribute(tri, h.intersectionPoint, data.d_mesh, data.d_mesh->findAttrib(FW::MeshBase::AttribType_Normal)));
+		FW::Vec3f normal = interpolateAttribute(tri, h.intersectionPoint, data.d_mesh, data.d_mesh->findAttrib(FW::MeshBase::AttribType_Normal));
 		normal = normal.normalized();
 
 		const float alpha = 10.818f;
@@ -488,12 +481,12 @@ void Renderer::imageScanline(FW::MulticoreLauncher::Task& t)
 	}
 }
 
-FW::Vec3f Renderer::finalGathering(const FW::Vec3f& pos, const FW::Vec3f& normal, const contextData& data, Node** buffer, const size_t rays)
+FW::Vec3f Renderer::finalGathering(const Hit& h, const FW::Vec3f& normal, const contextData& data, Node** buffer, const size_t rays)
 {
 	if(rays == 1)
 	{
-		float r = data.d_FGRadius;
-		int index = RayTracer::get().findNearestPhoton(pos, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, buffer);
+		float r = data.d_FGRadius;		
+		int index = RayTracer::get().findNearestPhoton(h.intersectionPoint, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, buffer);
 		if(index == -1)
 			return FW::Vec3f();
 		else
@@ -501,17 +494,57 @@ FW::Vec3f Renderer::finalGathering(const FW::Vec3f& pos, const FW::Vec3f& normal
 	}
 	else
 	{
-		FW::Vec3f org = pos + 0.001f * normal;
+		FW::Vec3f org = h.intersectionPoint + 0.001f * normal;
 		FW::Vec3f total = FW::Vec3f();
 		FW::Random random = FW::Random();
-		for(auto i = 0u; i < data.d_numberOfFGRays; ++i)
-		{	
-			FW::Vec3f dir = randomVectorToHalfUnitSphere(normal, random);
-			Hit hit = Hit(10.f);
-			total += traceRay(org, dir, data, buffer, 0u, true);
+		float r = data.d_FGRadius;		
+		int index = RayTracer::get().findNearestPhoton(h.intersectionPoint, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, buffer);
+		if(!(*data.d_photons)[index].g)
+		{
+			for(auto i = 0u; i < data.d_numberOfFGRays; ++i)
+			{	
+				FW::Vec3f dir = randomVectorToHalfUnitSphere(normal, random);
+				total += traceRay(org, dir, data, buffer, 0u, true);
+			}
+			total *= 1.f/(float) rays;
+			return total;
 		}
-		total *= 1.f/(float) rays;
-		return total;
+		else
+		{
+			std::vector<HeapNode> nodes;
+			float r = data.d_FGRadius;
+			RayTracer::get().searchPhotons(h.intersectionPoint, *data.d_photons, *data.d_photonIndexList, data.d_photonTree, r, 50u, nodes, buffer);
+
+			if(nodes.empty())
+				return FW::Vec3f();
+
+			const Triangle& tri = h.triangle;
+			FW::Vec3f normal = interpolateAttribute(tri, h.intersectionPoint, data.d_mesh, data.d_mesh->findAttrib(FW::MeshBase::AttribType_Normal));
+			normal = normal.normalized();
+
+			const float alpha = 10.818f;
+			const float beta = 1.953f;
+			const float e = 2.718281f;
+
+			FW::Vec3f Li = FW::Vec3f();
+			for ( int j = 1; j < nodes.size(); ++j )
+			{		
+				FW::Vec3f lightDir = (*data.d_photons)[nodes[j].value].dir;
+				float dot = FW::dot(lightDir, normal);
+				if(dot < .0f)
+					continue;
+				float d = nodes[j].key;
+				float t1 = 1.0f - pow( e, ( -beta * d * d / ( 2.0f * r * r) ) );
+				float t2 = 1.0f - pow( e, -beta );
+				float w = alpha * ( 1.0f - (t1 / t2) );
+				const Hit& photonHit = (*data.d_tmpHitList)[nodes[j].value];
+				TriangleToMeshData* map = (TriangleToMeshData*) photonHit.triangle.m_userPointer;
+				FW::Vec3f barys = FW::Vec3f((1.0f - photonHit.u - photonHit.v, photonHit.u, photonHit.v));
+				Li +=  w * (*data.d_photons)[nodes[j].value].power * dot * getAlbedo(map, data.d_mesh, barys);
+			}
+			float A = FW_PI*r*r;
+			return (Li / A);
+		}
 	}
 };
 
@@ -533,36 +566,51 @@ FW::Vec3f Renderer::traceRay(const FW::Vec3f& orig, const FW::Vec3f& d, const co
 	const Triangle& tri = hit.triangle;
 	FW::MeshBase::Material mat;
 	MaterialPM matType = shader(hit, mesh, mat);
-	FW::Vec3f n = (interpolateAttribute(tri, hit.intersectionPoint, mesh, mesh->findAttrib(FW::MeshBase::AttribType_Normal)));
+	FW::Vec3f n = interpolateAttribute(tri, hit.intersectionPoint, data.d_mesh, data.d_mesh->findAttrib(FW::MeshBase::AttribType_Normal));
 	n = n.normalized();
 	FW::Vec3f newOrig = hit.intersectionPoint + 0.0001f * n;
 
-	if(matType == MaterialPM_Lightsource)
-	{
-		Triangle& tri = hit.triangle;
-		FW::Vec3f albedo = getAlbedo((TriangleToMeshData*) hit.triangle.m_userPointer, mesh,FW::Vec3f(1.f-hit.u-hit.v, hit.u, hit.v));
-		float dot = FW::dot(-dir, n);	
-		if(dot < 0)
-			dot = FW::dot(-dir, -n);
-				
-		return *(*data.d_triangles)[hit.i].m_lightPower * albedo * dot * data.d_totalLight; 
-	}
-	else if(matType == MaterialPM_Diffuse)
+	if(matType == MaterialPM_Diffuse)
 	{
 		FW::Vec3f albedo = getAlbedo((TriangleToMeshData*) hit.triangle.m_userPointer, mesh, FW::Vec3f(1.f-hit.u-hit.v, hit.u, hit.v));
 		size_t rays = 1u;
 		if(!FGRay)
 			rays = data.d_numberOfFGRays;
 		
-		return albedo * finalGathering(newOrig, n, data, buffer, rays);
+		return albedo * finalGathering(hit, n, data, buffer, rays);
 	}
 	else if(matType == MaterialPM_Mirror)
 	{
 		FW::Vec3f newDir = dir - 2.f*FW::dot(dir, n)*n;
 		newDir = newDir.normalized();
-		return traceRay(newOrig, newDir, data, buffer, bounce + 1, FGRay);		
+		return mat.tf * traceRay(newOrig, newDir, data, buffer, bounce + 1, FGRay);		
 	}
-	else if(matType == MaterialPM_GlassSolid)
+	else if (matType == MaterialPM_GlassBillboard)
+	{
+		const float n2 = mat.opticalDensity;
+		const float nDiv = (n1/n2);
+
+		//Billboard is just surface, which each vertex has same normal => if hit comes from behind whe just swap this normal around.
+		float dotI = FW::dot(-dir, n);
+		if(dotI < .0f)
+		{
+			n *= -1.f;
+			dotI = FW::dot(-dir, n);
+		}
+		
+		//Unlike with real glass, with billboard always n1<n2 which makes things easier 
+		float R0 = std::pow(((n1-n2)/(n1+n2)), 2);
+		float RShclick = R0 + (1-R0)*std::pow((1.f-dotI),5);
+		FW::Vec3f refractionDir =  (nDiv*dir-(nDiv*dotI+FW::sqrt(1.f-(nDiv*nDiv)*(1.f-dotI*dotI)))*n).normalized();
+		FW::Vec3f reflectionDir = (2.f*FW::dot(-dir, n)*n-dir).normalized();
+
+		FW::Vec3f reflection = RShclick * traceRay(hit.intersectionPoint + 0.0001f * n, reflectionDir, data, buffer, bounce+1,FGRay);
+		FW::Vec3f refraction = (1.f- RShclick) * traceRay(hit.intersectionPoint - 0.0001f * n, refractionDir, data, buffer, bounce+1, FGRay);
+		FW::Vec3f albedo = getAlbedo((TriangleToMeshData*) hit.triangle.m_userPointer, mesh, FW::Vec3f(1.f-hit.u-hit.v, hit.u, hit.v));
+
+		return mat.tf*(reflection +  refraction);
+	}
+	else
 	{
 		float n2;
 		if(n1 < 1.001f)
@@ -620,50 +668,41 @@ FW::Vec3f Renderer::traceRay(const FW::Vec3f& orig, const FW::Vec3f& d, const co
 				RShclick = R0 + (1-R0)*std::pow((1.f-dotT),5);
 			}
 		}
-
-		FW::Vec3f reflection = FW::Vec3f();
-		FW::Vec3f refraction = FW::Vec3f();
-
-		//Reflection, if TIR => RShclick = 1.f. First one is n1 < n2 ray from outside glass object, seconed one is ray inside object.
-		if(bounce < 5u)
+		if(matType == MaterialPM_GlassSolid)
 		{
-			if(toDenser)
-				reflection = RShclick * traceRay(hit.intersectionPoint + n*.0001f, reflectionDir, data, buffer, bounce + 1, FGRay);
-			else
-				reflection = RShclick * traceRay(hit.intersectionPoint + n*.0001f, reflectionDir, data, buffer, bounce + 1, FGRay, n2);
+			FW::Vec3f reflection = FW::Vec3f();
+			FW::Vec3f refraction = FW::Vec3f();
+
+			//Reflection, if TIR => RShclick = 1.f. First one is n1 < n2 ray from outside glass object, seconed one is ray inside object.
+			if(bounce < 5u)
+			{
+				if(toDenser)
+					reflection = RShclick * traceRay(hit.intersectionPoint + n*.0001f, reflectionDir, data, buffer, bounce + 1, FGRay);
+				else
+					reflection = RShclick * traceRay(hit.intersectionPoint + n*.0001f, reflectionDir, data, buffer, bounce + 1, FGRay, n2);
+			}
+			//Refratino if there is no TIR, ray's movement same as above. To note, starting position of new ray must be behind of hit.
+			if(!TIR)
+			{
+				if(toDenser)
+					refraction = (1.f-RShclick)*traceRay(hit.intersectionPoint - n*.0001f, refractionDir, data, buffer, bounce + 1, FGRay, n2);
+				else
+					refraction = (1.f-RShclick)*traceRay(hit.intersectionPoint - n*.0001f, refractionDir, data, buffer, bounce + 1, FGRay);
+			}
+
+			return reflection + refraction;
 		}
-		//Refratino if there is no TIR, ray's movement same as above. To note, starting position of new ray must be behind of hit.
-		if(!TIR)
+		else if(matType == MaterialPM_Lightsource)
 		{
-			if(toDenser)
-				refraction = (1.f-RShclick)*traceRay(hit.intersectionPoint - n*.0001f, refractionDir, data, buffer, bounce + 1, FGRay, n2);
-			else
-				refraction = (1.f-RShclick)*traceRay(hit.intersectionPoint - n*.0001f, refractionDir, data, buffer, bounce + 1, FGRay);
+			FW::Vec3f albedo = getAlbedo((TriangleToMeshData*) hit.triangle.m_userPointer, mesh,FW::Vec3f(1.f-hit.u-hit.v, hit.u, hit.v));
+			const float e = 2.718281f;
+			const float m = mat.roughness;
+			const FW::Vec3f hVec = (-dir + n)*.5f;
+			const float dotHN = FW::dot(hVec, n);
+			const float exp = (dotHN*dotHN-1.f)/(m*m*dotHN*dotHN);
+			const float D = std::pow(e,exp)/(m*m*std::pow(dotHN, 4));
+			return mat.tf * albedo * D;
 		}
-
-		return reflection + refraction;
-	}
-	else if (matType == MaterialPM_GlassBillboard)
-	{
-		const float n2 = mat.opticalDensity;
-		const float nDiv = (n1/n2);
-
-		//Billboard is just surface, which each vertex has same normal => if hit comes from behind whe just swap this normal around.
-		float dotI = FW::dot(-dir, n);
-		if(dotI < .0f)
-		{
-			n *= -1.f;
-			dotI = FW::dot(-dir, n);
-		}
-		
-		//Unlike with real glass, with billboard always n1<n2 which makes things easier 
-		float R0 = std::pow(((n1-n2)/(n1+n2)), 2);
-		float RShclick = R0 + (1-R0)*std::pow((1.f-dotI),5);
-
-		FW::Vec3f reflection = traceRay(hit.intersectionPoint + 0.0001f * n, (2.f*FW::dot(-dir, n)*n-dir).normalized(), data, buffer, bounce+1,FGRay);
-		FW::Vec3f refraction = traceRay(hit.intersectionPoint - 0.0001f * n, (-nDiv * (-dir - dotI*n) -n*FW::sqrt(1.f-(nDiv*nDiv)*(1-(dotI*dotI)))).normalized(), data, buffer, bounce+1, FGRay);
-
-		return RShclick * reflection + (1.f- RShclick) * refraction;
 	}
 
 	//To shut the compiler up, should never get here
@@ -686,6 +725,8 @@ MaterialPM Renderer::shader(const Hit& h, MeshC* mesh, FW::MeshBase::Material& m
 		return MaterialPM_Mirror;
 	if(mat.illuminationModel == 7u)
 		return MaterialPM_GlassSolid;
+	if(mat.illuminationModel == 6u)
+		return MaterialPM_GlassBillboard;
 	else
 		return MaterialPM_Diffuse; 
 }
@@ -779,15 +820,15 @@ FW::Vec3f Renderer::getAlbedo(const TriangleToMeshData* map, const MeshC* mesh, 
 
 		int x = UV.x * imageSize.x;
 		while(x < 0)
-			x += (imageSize.x-1);
+			x += imageSize.x;
 
-		x = x % (imageSize.x - 1);
+		x = x % imageSize.x;
 
 		int y = UV.y * imageSize.y;
 		while(x < 0)
-			y += (imageSize.x-1);
+			y += imageSize.x;
 
-		y = y % (imageSize.x - 1);
+		y = y % imageSize.x;
 					
 
 		FW::Vec2i pos = FW::Vec2i(x,y);

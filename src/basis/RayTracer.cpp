@@ -134,7 +134,6 @@ void RayTracer::constructTree(size_t startPrim, size_t endPrim, Node* node, Node
 	
 	node->leftChild = NULL;
 	node->rightChild = NULL;
-	Axis axis;
 
 	if (node == root)
 	{

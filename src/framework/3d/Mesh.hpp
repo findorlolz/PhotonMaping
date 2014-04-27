@@ -81,6 +81,7 @@ public:
     {
         Vec4f           diffuse;
         Vec3f           specular;
+        Vec3f           tf;
 		Vec3f			emissive;
 		F32				roughness;
         F32             glossiness;
@@ -94,7 +95,8 @@ public:
         {
             diffuse             = Vec4f(0.75f, 0.75f, 0.75f, 1.0f);
 			emissive			= Vec3f();
-            specular            = 0.5f;
+			tf					= Vec3f();
+            specular            = 0.25f;
 			roughness			= .5f;
             glossiness          = 32.0f;
             displacementCoef    = 1.0f;

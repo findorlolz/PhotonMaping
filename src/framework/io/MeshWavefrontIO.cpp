@@ -254,6 +254,11 @@ void FW::loadMtl(ImportState& s, BufferedInputStream& mtlIn, const String& dirNa
 			if(parseFloats(ptr, mat->emissive.getPtr(), 3) && parseSpace(ptr) && !*ptr)
                 valid = true;
         }
+        else if (parseLiteral(ptr, "Tf ") && parseSpace(ptr)) // specular color
+        {
+			if(parseFloats(ptr, mat->tf.getPtr(), 3) && parseSpace(ptr) && !*ptr)
+                valid = true;
+        }
         else if (parseLiteral(ptr, "d ") && parseSpace(ptr)) // alpha
         {
             if (parseFloat(ptr, mat->diffuse.w) && parseSpace(ptr) && !*ptr)

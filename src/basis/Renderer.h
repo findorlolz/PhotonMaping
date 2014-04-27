@@ -63,7 +63,7 @@ private:
         ~Renderer() {}
 
 		void castPhotons(const size_t numOfPhotons, std::vector<Hit>& tmpHitList);
-		void tracePhoton(const FW::Vec3f&, const FW::Vec3f&, const FW::Vec3f&, const size_t, Node**, std::vector<Hit>&, const float n1 = 1.f);
+		void tracePhoton(const FW::Vec3f&, const FW::Vec3f&, const FW::Vec3f&, const size_t, Node**, std::vector<Hit>&, bool, const float n1 = 1.f);
 
 		void preCalculateOutgoingLight(std::vector<Hit>&);
 		static void outgoingLightFunc(FW::MulticoreLauncher::Task&);
@@ -83,7 +83,6 @@ private:
 		struct contextData
 		{
 			FW::Mat4f d_invP;
-			FW::Vec3f d_lightPosEstimate;
 			size_t d_numberOfFGRays;
 			size_t d_numberOfSamplesByDimension;
 			float d_FGRadius;
@@ -107,7 +106,7 @@ private:
 		static FW::Vec3f randomVectorToHalfUnitSphere(const FW::Vec3f&, FW::Random&);
 		static FW::Vec3f traceRay(const FW::Vec3f&, const FW::Vec3f&, const contextData&, Node**, const size_t, bool = false, const float = 1.f);
 		
-		static FW::Vec3f finalGathering(const FW::Vec3f&, const FW::Vec3f&, const contextData&, Node**, const size_t);
+		static FW::Vec3f finalGathering(const Hit&, const FW::Vec3f&, const contextData&, Node**, const size_t);
 
 		static MaterialPM shader(const Hit&, MeshC*);
 		static MaterialPM shader(const Hit&, MeshC*, FW::MeshBase::Material&);
